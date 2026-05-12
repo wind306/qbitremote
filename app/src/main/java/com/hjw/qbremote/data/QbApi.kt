@@ -1,4 +1,4 @@
-package com.hjw.qbremote.data
+﻿package com.hjw.qbremote.data
 
 import com.hjw.qbremote.data.model.TorrentInfo
 import com.hjw.qbremote.data.model.TorrentFileInfo
@@ -11,6 +11,7 @@ import okhttp3.RequestBody
 import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.Field
+import retrofit2.http.FieldMap
 import retrofit2.http.FormUrlEncoded
 import retrofit2.http.GET
 import retrofit2.http.Multipart
@@ -40,13 +41,34 @@ interface QbApi {
     @GET("api/v2/app/version")
     suspend fun appVersion(): String
 
-    @GET("api/v2/torrents/info")
+    @GET("api/v2/sync/maindata")
+    suspend fun syncMaindata(
+        @Query("rid") rid: Int = 0,
+    ): com.google.gson.JsonObject
+
+@GET("api/v2/torrents/info")
     suspend fun torrentsInfo(
         @Query("sort") sort: String = "added_on",
         @Query("reverse") reverse: Boolean = true,
+        @Query("limit") limit: Int? = null,
+        @Query("offset") offset: Int? = null,
         @Query("hashes") hashes: String? = null,
     ): List<TorrentInfo>
 
+    // qBittorrent >= 5.0 renamed pause/stop, resume/start
+    @FormUrlEncoded
+    @POST("api/v2/torrents/stop")
+    suspend fun stopTorrents(
+        @Field("hashes") hashes: String,
+    ): Response<Unit>
+
+    @FormUrlEncoded
+    @POST("api/v2/torrents/start")
+    suspend fun startTorrents(
+        @Field("hashes") hashes: String,
+    ): Response<Unit>
+
+    // Legacy endpoints for qBittorrent < 5.0
     @FormUrlEncoded
     @POST("api/v2/torrents/pause")
     suspend fun pauseTorrents(
@@ -196,4 +218,13 @@ interface QbApi {
         @PartMap fields: Map<String, @JvmSuppressWildcards RequestBody>,
         @Part torrents: List<MultipartBody.Part>,
     ): Response<String>
+
+    @FormUrlEncoded
+    @POST("api/v2/torrents/add")
+    suspend fun addTorrentsForm(
+        @FieldMap fields: Map<String, String>,
+    ): Response<String>
 }
+
+
+

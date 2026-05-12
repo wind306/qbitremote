@@ -35,6 +35,14 @@ class QbRepository : TorrentBackend {
     private var api: QbApi? = null
     private var activeSettings: ConnectionSettings? = null
 
+    private val baseOkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(12, TimeUnit.SECONDS)
+            .writeTimeout(12, TimeUnit.SECONDS)
+            .build()
+    }
+
     private val torrentCache = linkedMapOf<String, TorrentInfo>()
     private val credentialTrimChars = charArrayOf(' ', '\t', '\r', '\n', '\u0000', '\uFEFF')
 
@@ -94,6 +102,10 @@ class QbRepository : TorrentBackend {
         torrentCache.clear()
     }
 
+    override suspend fun fetchTransferInfo(): Result<com.hjw.qbremote.data.model.TransferInfo> = runCatching {
+        executeWithRetry { liveApi -> liveApi.transferInfo() }
+    }
+
     override suspend fun fetchDashboard(): Result<DashboardData> = runCatching {
         // Always use full refresh to avoid incremental-field overwrite issues.
         fallbackFullRefresh()
@@ -111,15 +123,35 @@ class QbRepository : TorrentBackend {
 
     override suspend fun pauseTorrent(hash: String): Result<Unit> = runCatching {
         require(hash.isNotBlank()) { "Invalid torrent hash." }
-        executeWithRetry { liveApi ->
-            liveApi.pauseTorrents(hash).ensureSuccess("Pause failed.")
+        try {
+            executeWithRetry { liveApi ->
+                liveApi.stopTorrents(hash).ensureSuccess("Pause failed.")
+            }
+        } catch (e: HttpException) {
+            if (e.code() == 404 || e.code() == 405) {
+                executeWithRetry { liveApi ->
+                    liveApi.pauseTorrents(hash).ensureSuccess("Pause failed.")
+                }
+            } else {
+                throw e
+            }
         }
     }
 
     override suspend fun resumeTorrent(hash: String): Result<Unit> = runCatching {
         require(hash.isNotBlank()) { "Invalid torrent hash." }
-        executeWithRetry { liveApi ->
-            liveApi.resumeTorrents(hash).ensureSuccess("Resume failed.")
+        try {
+            executeWithRetry { liveApi ->
+                liveApi.startTorrents(hash).ensureSuccess("Resume failed.")
+            }
+        } catch (e: HttpException) {
+            if (e.code() == 404 || e.code() == 405) {
+                executeWithRetry { liveApi ->
+                    liveApi.resumeTorrents(hash).ensureSuccess("Resume failed.")
+                }
+            } else {
+                throw e
+            }
         }
     }
 
@@ -301,6 +333,27 @@ class QbRepository : TorrentBackend {
             "请填写种子链接或选择种子文件。"
         }
 
+        // For URL-only adds, use simpler form-urlencoded (more compatible with 5.2.x)
+        if (request.files.isEmpty() && urlsText.isNotBlank()) {
+            val formFields = linkedMapOf<String, String>()
+            formFields["urls"] = urlsText
+            if (request.category.trim().isNotBlank()) formFields["category"] = request.category.trim()
+            if (request.tags.trim().isNotBlank()) formFields["tags"] = request.tags.trim()
+            if (request.savePath.trim().isNotBlank()) formFields["savepath"] = request.savePath.trim()
+            formFields["autoTMM"] = if (request.autoTmm) "true" else "false"
+            formFields["paused"] = if (request.paused) "true" else "false"
+            formFields["skip_checking"] = if (request.skipChecking) "true" else "false"
+            formFields["sequentialDownload"] = if (request.sequentialDownload) "true" else "false"
+            formFields["firstLastPiecePrio"] = if (request.firstLastPiecePrio) "true" else "false"
+            if (request.uploadLimitBytes >= 0L) formFields["upLimit"] = request.uploadLimitBytes.toString()
+            if (request.downloadLimitBytes >= 0L) formFields["dlLimit"] = request.downloadLimitBytes.toString()
+
+            val response = executeWithRetry { liveApi -> liveApi.addTorrentsForm(formFields) }
+            response.ensureSuccess("Add torrent failed.")
+            return@runCatching
+        }
+
+        // For file uploads, use multipart
         val textMediaType = "text/plain".toMediaType()
         val fields = linkedMapOf<String, RequestBody>()
         fun putField(key: String, value: String) {
@@ -345,8 +398,13 @@ class QbRepository : TorrentBackend {
 
     private suspend fun fallbackFullRefresh(): DashboardData {
         val transfer = executeWithRetry { liveApi -> liveApi.transferInfo() }
+        val maindata = runCatching { executeWithRetry { liveApi -> liveApi.syncMaindata(0) } }.getOrNull()
         val rawTorrents = executeWithRetry { liveApi ->
-            liveApi.torrentsInfo().sortedByDescending { it.addedOn }
+            liveApi.torrentsInfo(
+                sort = "added_on",
+                reverse = true,
+                limit = MAX_FETCH_DASHBOARD_TORRENTS,
+            )
         }
         val previousByHash = torrentCache.toMap()
         val baseTorrents = rawTorrents
@@ -380,7 +438,7 @@ class QbRepository : TorrentBackend {
         }
 
         return DashboardData(
-            transferInfo = normalizeTransferInfo(transfer, torrents),
+            transferInfo = normalizeTransferInfo(maindata, transfer, torrents),
             torrents = torrents,
         )
     }
@@ -675,11 +733,8 @@ class QbRepository : TorrentBackend {
     private fun buildApi(baseUrl: String, headerMode: HeaderMode): QbApi {
         val parsedBaseUrl = baseUrl.toHttpUrl()
 
-        val clientBuilder = OkHttpClient.Builder()
+        val clientBuilder = baseOkHttpClient.newBuilder()
             .cookieJar(SessionCookieJar())
-            .connectTimeout(8, TimeUnit.SECONDS)
-            .readTimeout(12, TimeUnit.SECONDS)
-            .writeTimeout(12, TimeUnit.SECONDS)
         if (headerMode == HeaderMode.WEBUI_HEADERS) {
             clientBuilder.addInterceptor(WebUiHeaderInterceptor(parsedBaseUrl))
         }
@@ -805,6 +860,7 @@ class QbRepository : TorrentBackend {
     }
 
     private fun normalizeTransferInfo(
+        maindata: com.google.gson.JsonObject?,
         transfer: com.hjw.qbremote.data.model.TransferInfo,
         torrents: List<TorrentInfo>,
     ): com.hjw.qbremote.data.model.TransferInfo {
@@ -818,10 +874,15 @@ class QbRepository : TorrentBackend {
             val sum = torrents.sumOf { it.uploaded.coerceAtLeast(0L) }
             if (sum > 0L) uploaded = sum
         }
-        if (downloaded == transfer.downloadedTotal && uploaded == transfer.uploadedTotal) {
+        val freeSpaceOnDisk = maindata?.getAsJsonObject("server_state")?.get("free_space_on_disk")?.asLong ?: transfer.freeSpaceOnDisk
+        if (downloaded == transfer.downloadedTotal && uploaded == transfer.uploadedTotal && freeSpaceOnDisk == transfer.freeSpaceOnDisk) {
             return transfer
         }
-        return transfer.copy(downloadedTotal = downloaded, uploadedTotal = uploaded)
+        return transfer.copy(
+            downloadedTotal = downloaded,
+            uploadedTotal = uploaded,
+            freeSpaceOnDisk = freeSpaceOnDisk,
+        )
     }
 
     private fun sanitizeTorrentInfo(
@@ -1031,24 +1092,8 @@ internal fun detectTransmissionMismatchForQbResponse(
     )
 }
 
-internal fun summarizeQbLoginResponseText(text: String): String {
-    val trimmed = text.trim()
-    if (trimmed.isBlank()) return "Unexpected response."
-    return Regex("<title>(.*?)</title>", RegexOption.IGNORE_CASE)
-        .find(trimmed)
-        ?.groupValues
-        ?.getOrNull(1)
-        ?.trim()
-        ?.takeIf { it.isNotBlank() }
-        ?: trimmed
-            .replace(Regex("\\s+"), " ")
-            .take(160)
-}
 
-internal fun looksLikeHtmlPayload(text: String): Boolean {
-    val normalized = text.trim().lowercase(Locale.US)
-    return normalized.startsWith("<!doctype html") ||
-        normalized.startsWith("<html") ||
-        normalized.contains("<title>")
-}
+
+
+
 

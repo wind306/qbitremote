@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -76,6 +77,7 @@ internal fun AddTorrentSheet(
     categoryOptions: List<String>,
     tagOptions: List<String>,
     pathOptions: List<String>,
+    initialUrls: String = "",
     onCancel: () -> Unit,
     onAdd: (
         urls: String,
@@ -95,7 +97,7 @@ internal fun AddTorrentSheet(
     val supportsCategories = capabilities.supportsCategories
     val supportsSpeedLimits = capabilities.supportsPerTorrentSpeedLimit
     val supportsAdvancedAddOptions = capabilities.supportsAdvancedAddOptions
-    var urls by remember { mutableStateOf("") }
+    var urls by remember { mutableStateOf(initialUrls) }
     var selectedFiles by remember { mutableStateOf(listOf<AddTorrentFile>()) }
     var autoTmm by remember { mutableStateOf(false) }
     var category by remember { mutableStateOf("") }
@@ -138,6 +140,8 @@ internal fun AddTorrentSheet(
             .fillMaxWidth()
             .heightIn(max = 700.dp)
             .verticalScroll(rememberScrollState())
+            .navigationBarsPadding()
+            .imePadding()
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -529,6 +533,7 @@ internal fun ServerProfileSheet(
             .fillMaxWidth()
             .heightIn(max = 760.dp)
             .verticalScroll(scrollState)
+            .navigationBarsPadding()
             .imePadding()
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),

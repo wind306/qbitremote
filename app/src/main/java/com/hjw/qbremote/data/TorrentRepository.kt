@@ -5,6 +5,7 @@ import com.hjw.qbremote.data.model.CountryPeerSnapshot
 import com.hjw.qbremote.data.model.DashboardData
 import com.hjw.qbremote.data.model.TorrentDetailData
 import com.hjw.qbremote.data.model.TorrentTracker
+import com.hjw.qbremote.data.model.TransferInfo
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -111,135 +112,83 @@ class TorrentRepository {
         clearSession(profileId)
     }
 
-    suspend fun fetchDashboard(): Result<DashboardData> = requireSelectedEntry().backend.fetchDashboard()
+    // -- delegated operations --
 
-    suspend fun fetchDashboard(profileId: String): Result<DashboardData> =
-        requireEntry(profileId).backend.fetchDashboard()
+    private suspend inline fun <T> withBackend(
+        profileId: String? = null,
+        crossinline block: suspend TorrentBackend.() -> T,
+    ): T {
+        val entry = profileId?.let { requireEntry(it) } ?: requireSelectedEntry()
+        return entry.backend.block()
+    }
+
+    suspend fun fetchTransferInfo() = withBackend { fetchTransferInfo() }
+    suspend fun fetchTransferInfo(profileId: String) = withBackend(profileId) { fetchTransferInfo() }
+
+    suspend fun fetchTransferInfo(settings: ConnectionSettings): Result<TransferInfo> {
+        val backend = createBackend(settings.serverBackendType)
+        return backend.connect(settings).fold(
+            onSuccess = { backend.fetchTransferInfo() },
+            onFailure = { error -> Result.failure(error) },
+        )
+    }
+
+    suspend fun fetchDashboard() = withBackend { fetchDashboard() }
+    suspend fun fetchDashboard(profileId: String) = withBackend(profileId) { fetchDashboard() }
 
     suspend fun fetchDashboardSnapshot(settings: ConnectionSettings): Result<DashboardSnapshotFetchResult> {
         return createBackend(settings.serverBackendType).fetchDashboardSnapshot(settings)
     }
 
-    suspend fun pauseTorrent(hash: String): Result<Unit> = requireSelectedEntry().backend.pauseTorrent(hash)
+    suspend fun pauseTorrent(hash: String) = withBackend { pauseTorrent(hash) }
+    suspend fun pauseTorrent(profileId: String, hash: String) = withBackend(profileId) { pauseTorrent(hash) }
 
-    suspend fun pauseTorrent(
-        profileId: String,
-        hash: String,
-    ): Result<Unit> = requireEntry(profileId).backend.pauseTorrent(hash)
+    suspend fun resumeTorrent(hash: String) = withBackend { resumeTorrent(hash) }
+    suspend fun resumeTorrent(profileId: String, hash: String) = withBackend(profileId) { resumeTorrent(hash) }
 
-    suspend fun resumeTorrent(hash: String): Result<Unit> = requireSelectedEntry().backend.resumeTorrent(hash)
+    suspend fun deleteTorrent(hash: String, deleteFiles: Boolean) = withBackend { deleteTorrent(hash, deleteFiles) }
+    suspend fun deleteTorrent(profileId: String, hash: String, deleteFiles: Boolean) =
+        withBackend(profileId) { deleteTorrent(hash, deleteFiles) }
 
-    suspend fun resumeTorrent(
-        profileId: String,
-        hash: String,
-    ): Result<Unit> = requireEntry(profileId).backend.resumeTorrent(hash)
+    suspend fun reannounceTorrent(hash: String) = withBackend { reannounceTorrent(hash) }
+    suspend fun reannounceTorrent(profileId: String, hash: String) = withBackend(profileId) { reannounceTorrent(hash) }
 
-    suspend fun deleteTorrent(hash: String, deleteFiles: Boolean): Result<Unit> =
-        requireSelectedEntry().backend.deleteTorrent(hash, deleteFiles)
+    suspend fun recheckTorrent(hash: String) = withBackend { recheckTorrent(hash) }
+    suspend fun recheckTorrent(profileId: String, hash: String) = withBackend(profileId) { recheckTorrent(hash) }
 
-    suspend fun deleteTorrent(
-        profileId: String,
-        hash: String,
-        deleteFiles: Boolean,
-    ): Result<Unit> = requireEntry(profileId).backend.deleteTorrent(hash, deleteFiles)
+    suspend fun fetchServerVersion() = withBackend { fetchServerVersion() }
+    suspend fun fetchServerVersion(profileId: String) = withBackend(profileId) { fetchServerVersion() }
 
-    suspend fun reannounceTorrent(hash: String): Result<Unit> =
-        requireSelectedEntry().backend.reannounceTorrent(hash)
+    suspend fun fetchTorrentDetail(hash: String) = withBackend { fetchTorrentDetail(hash) }
+    suspend fun fetchTorrentDetail(profileId: String, hash: String) = withBackend(profileId) { fetchTorrentDetail(hash) }
 
-    suspend fun reannounceTorrent(
-        profileId: String,
-        hash: String,
-    ): Result<Unit> = requireEntry(profileId).backend.reannounceTorrent(hash)
+    suspend fun fetchTorrentTrackers(hash: String) = withBackend { fetchTorrentTrackers(hash) }
+    suspend fun fetchTorrentTrackers(profileId: String, hash: String) = withBackend(profileId) { fetchTorrentTrackers(hash) }
 
-    suspend fun recheckTorrent(hash: String): Result<Unit> =
-        requireSelectedEntry().backend.recheckTorrent(hash)
+    suspend fun addTracker(hash: String, trackerUrl: String) = withBackend { addTracker(hash, trackerUrl) }
+    suspend fun addTracker(profileId: String, hash: String, trackerUrl: String) =
+        withBackend(profileId) { addTracker(hash, trackerUrl) }
 
-    suspend fun recheckTorrent(
-        profileId: String,
-        hash: String,
-    ): Result<Unit> = requireEntry(profileId).backend.recheckTorrent(hash)
+    suspend fun editTracker(hash: String, tracker: TorrentTracker, newUrl: String) =
+        withBackend { editTracker(hash, tracker, newUrl) }
+    suspend fun editTracker(profileId: String, hash: String, tracker: TorrentTracker, newUrl: String) =
+        withBackend(profileId) { editTracker(hash, tracker, newUrl) }
 
-    suspend fun fetchServerVersion(): Result<String> = requireSelectedEntry().backend.fetchServerVersion()
+    suspend fun removeTracker(hash: String, tracker: TorrentTracker) = withBackend { removeTracker(hash, tracker) }
+    suspend fun removeTracker(profileId: String, hash: String, tracker: TorrentTracker) =
+        withBackend(profileId) { removeTracker(hash, tracker) }
 
-    suspend fun fetchServerVersion(profileId: String): Result<String> =
-        requireEntry(profileId).backend.fetchServerVersion()
+    suspend fun exportTorrentFile(hash: String) = withBackend { exportTorrentFile(hash) }
+    suspend fun exportTorrentFile(profileId: String, hash: String) = withBackend(profileId) { exportTorrentFile(hash) }
 
-    suspend fun fetchTorrentDetail(hash: String): Result<TorrentDetailData> =
-        requireSelectedEntry().backend.fetchTorrentDetail(hash)
+    suspend fun fetchCategoryOptions() = withBackend { fetchCategoryOptions() }
+    suspend fun fetchTagOptions() = withBackend { fetchTagOptions() }
+    suspend fun fetchCategoryOptions(profileId: String) = withBackend(profileId) { fetchCategoryOptions() }
+    suspend fun fetchTagOptions(profileId: String) = withBackend(profileId) { fetchTagOptions() }
 
-    suspend fun fetchTorrentDetail(
-        profileId: String,
-        hash: String,
-    ): Result<TorrentDetailData> = requireEntry(profileId).backend.fetchTorrentDetail(hash)
-
-    suspend fun fetchTorrentTrackers(hash: String): Result<List<TorrentTracker>> =
-        requireSelectedEntry().backend.fetchTorrentTrackers(hash)
-
-    suspend fun fetchTorrentTrackers(
-        profileId: String,
-        hash: String,
-    ): Result<List<TorrentTracker>> = requireEntry(profileId).backend.fetchTorrentTrackers(hash)
-
-    suspend fun addTracker(hash: String, trackerUrl: String): Result<Unit> =
-        requireSelectedEntry().backend.addTracker(hash, trackerUrl)
-
-    suspend fun addTracker(
-        profileId: String,
-        hash: String,
-        trackerUrl: String,
-    ): Result<Unit> = requireEntry(profileId).backend.addTracker(hash, trackerUrl)
-
-    suspend fun editTracker(
-        hash: String,
-        tracker: TorrentTracker,
-        newUrl: String,
-    ): Result<Unit> = requireSelectedEntry().backend.editTracker(hash, tracker, newUrl)
-
-    suspend fun editTracker(
-        profileId: String,
-        hash: String,
-        tracker: TorrentTracker,
-        newUrl: String,
-    ): Result<Unit> = requireEntry(profileId).backend.editTracker(hash, tracker, newUrl)
-
-    suspend fun removeTracker(hash: String, tracker: TorrentTracker): Result<Unit> =
-        requireSelectedEntry().backend.removeTracker(hash, tracker)
-
-    suspend fun removeTracker(
-        profileId: String,
-        hash: String,
-        tracker: TorrentTracker,
-    ): Result<Unit> = requireEntry(profileId).backend.removeTracker(hash, tracker)
-
-    suspend fun exportTorrentFile(hash: String): Result<ByteArray> =
-        requireSelectedEntry().backend.exportTorrentFile(hash)
-
-    suspend fun exportTorrentFile(
-        profileId: String,
-        hash: String,
-    ): Result<ByteArray> = requireEntry(profileId).backend.exportTorrentFile(hash)
-
-    suspend fun fetchCategoryOptions(): Result<List<String>> =
-        requireSelectedEntry().backend.fetchCategoryOptions()
-
-    suspend fun fetchTagOptions(): Result<List<String>> =
-        requireSelectedEntry().backend.fetchTagOptions()
-
-    suspend fun fetchCategoryOptions(profileId: String): Result<List<String>> =
-        requireEntry(profileId).backend.fetchCategoryOptions()
-
-    suspend fun fetchTagOptions(profileId: String): Result<List<String>> =
-        requireEntry(profileId).backend.fetchTagOptions()
-
-    suspend fun fetchCountryPeerSnapshots(hashes: List<String>): Result<List<CountryPeerSnapshot>> =
-        requireSelectedEntry().backend.fetchCountryPeerSnapshots(hashes)
-
-    suspend fun fetchCountryPeerSnapshots(
-        profileId: String,
-        hashes: List<String>,
-    ): Result<List<CountryPeerSnapshot>> {
-        return requireEntry(profileId).backend.fetchCountryPeerSnapshots(hashes)
-    }
+    suspend fun fetchCountryPeerSnapshots(hashes: List<String>) = withBackend { fetchCountryPeerSnapshots(hashes) }
+    suspend fun fetchCountryPeerSnapshots(profileId: String, hashes: List<String>) =
+        withBackend(profileId) { fetchCountryPeerSnapshots(hashes) }
 
     suspend fun fetchCountryPeerSnapshots(
         settings: ConnectionSettings,
@@ -259,80 +208,42 @@ class TorrentRepository {
         }
     }
 
-    suspend fun renameTorrent(hash: String, name: String): Result<Unit> =
-        requireSelectedEntry().backend.renameTorrent(hash, name)
+    suspend fun renameTorrent(hash: String, name: String) = withBackend { renameTorrent(hash, name) }
+    suspend fun renameTorrent(profileId: String, hash: String, name: String) =
+        withBackend(profileId) { renameTorrent(hash, name) }
 
-    suspend fun renameTorrent(
-        profileId: String,
-        hash: String,
-        name: String,
-    ): Result<Unit> = requireEntry(profileId).backend.renameTorrent(hash, name)
+    suspend fun setTorrentLocation(hash: String, location: String) = withBackend { setTorrentLocation(hash, location) }
+    suspend fun setTorrentLocation(profileId: String, hash: String, location: String) =
+        withBackend(profileId) { setTorrentLocation(hash, location) }
 
-    suspend fun setTorrentLocation(hash: String, location: String): Result<Unit> =
-        requireSelectedEntry().backend.setTorrentLocation(hash, location)
+    suspend fun setTorrentCategory(hash: String, category: String) = withBackend { setTorrentCategory(hash, category) }
+    suspend fun setTorrentCategory(profileId: String, hash: String, category: String) =
+        withBackend(profileId) { setTorrentCategory(hash, category) }
 
-    suspend fun setTorrentLocation(
-        profileId: String,
-        hash: String,
-        location: String,
-    ): Result<Unit> = requireEntry(profileId).backend.setTorrentLocation(hash, location)
+    suspend fun setTorrentTags(hash: String, oldTags: String, newTags: String) =
+        withBackend { setTorrentTags(hash, oldTags, newTags) }
+    suspend fun setTorrentTags(profileId: String, hash: String, oldTags: String, newTags: String) =
+        withBackend(profileId) { setTorrentTags(hash, oldTags, newTags) }
 
-    suspend fun setTorrentCategory(hash: String, category: String): Result<Unit> =
-        requireSelectedEntry().backend.setTorrentCategory(hash, category)
-
-    suspend fun setTorrentCategory(
-        profileId: String,
-        hash: String,
-        category: String,
-    ): Result<Unit> = requireEntry(profileId).backend.setTorrentCategory(hash, category)
-
-    suspend fun setTorrentTags(hash: String, oldTags: String, newTags: String): Result<Unit> =
-        requireSelectedEntry().backend.setTorrentTags(hash, oldTags, newTags)
-
-    suspend fun setTorrentTags(
-        profileId: String,
-        hash: String,
-        oldTags: String,
-        newTags: String,
-    ): Result<Unit> = requireEntry(profileId).backend.setTorrentTags(hash, oldTags, newTags)
-
-    suspend fun setTorrentSpeedLimit(
-        hash: String,
-        downloadLimitBytes: Long,
-        uploadLimitBytes: Long,
-    ): Result<Unit> = requireSelectedEntry().backend.setTorrentSpeedLimit(
-        hash = hash,
-        downloadLimitBytes = downloadLimitBytes,
-        uploadLimitBytes = uploadLimitBytes,
-    )
-
+    suspend fun setTorrentSpeedLimit(hash: String, downloadLimitBytes: Long, uploadLimitBytes: Long) =
+        withBackend { setTorrentSpeedLimit(hash, downloadLimitBytes, uploadLimitBytes) }
     suspend fun setTorrentSpeedLimit(
         profileId: String,
         hash: String,
         downloadLimitBytes: Long,
         uploadLimitBytes: Long,
-    ): Result<Unit> = requireEntry(profileId).backend.setTorrentSpeedLimit(
-        hash = hash,
-        downloadLimitBytes = downloadLimitBytes,
-        uploadLimitBytes = uploadLimitBytes,
-    )
+    ) = withBackend(profileId) { setTorrentSpeedLimit(hash, downloadLimitBytes, uploadLimitBytes) }
 
-    suspend fun setTorrentShareRatio(hash: String, ratioLimit: Double): Result<Unit> =
-        requireSelectedEntry().backend.setTorrentShareRatio(hash, ratioLimit)
+    suspend fun setTorrentShareRatio(hash: String, ratioLimit: Double) =
+        withBackend { setTorrentShareRatio(hash, ratioLimit) }
+    suspend fun setTorrentShareRatio(profileId: String, hash: String, ratioLimit: Double) =
+        withBackend(profileId) { setTorrentShareRatio(hash, ratioLimit) }
 
-    suspend fun setTorrentShareRatio(
-        profileId: String,
-        hash: String,
-        ratioLimit: Double,
-    ): Result<Unit> = requireEntry(profileId).backend.setTorrentShareRatio(hash, ratioLimit)
+    suspend fun addTorrent(request: AddTorrentRequest) = withBackend { addTorrent(request) }
+    suspend fun addTorrent(profileId: String, request: AddTorrentRequest) =
+        withBackend(profileId) { addTorrent(request) }
 
-    suspend fun addTorrent(request: AddTorrentRequest): Result<Unit> =
-        requireSelectedEntry().backend.addTorrent(request)
-
-    suspend fun addTorrent(
-        profileId: String,
-        request: AddTorrentRequest,
-    ): Result<Unit> = requireEntry(profileId).backend.addTorrent(request)
+    // -- internal helpers --
 
     private fun requireSelectedEntry(): SessionEntry {
         val profileId = selectedProfileId

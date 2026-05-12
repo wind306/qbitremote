@@ -3,6 +3,7 @@ package com.hjw.qbremote.data
 import com.google.gson.Gson
 import com.google.gson.JsonParser
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -117,5 +118,30 @@ class TransmissionBackendTest {
         assertEquals(654321L, stats.uploadSpeed)
         assertEquals(987654321L, stats.cumulativeDownloadedBytes)
         assertEquals(123456789L, stats.cumulativeUploadedBytes)
+    }
+
+    @Test
+    fun transmissionDashboardFields_preferTrackerListOverHeavyTrackerArrays() {
+        val fields = transmissionDashboardFields()
+
+        assertTrue(fields.contains("trackerList"))
+        assertFalse(fields.contains("trackers"))
+        assertFalse(fields.contains("trackerStats"))
+    }
+
+    @Test
+    fun resolveTransmissionPrimaryTracker_usesFirstTrackerListEntry() {
+        assertEquals(
+            "udp://tracker.example.com:80/announce",
+            resolveTransmissionPrimaryTracker(
+                """
+
+                udp://tracker.example.com:80/announce
+
+                https://backup.example.com/announce
+                """.trimIndent(),
+            ),
+        )
+        assertEquals("", resolveTransmissionPrimaryTracker(" \n\t "))
     }
 }

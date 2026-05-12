@@ -136,10 +136,16 @@ internal fun TrackerInfoCard(
     }
 }
 
+internal enum class TorrentUnifiedInfoPanelStyle {
+    SegmentedRows,
+    Summary,
+}
+
 @Composable
 internal fun TorrentUnifiedInfoPanel(
     items: List<Pair<String, String>>,
     modifier: Modifier = Modifier,
+    style: TorrentUnifiedInfoPanelStyle = TorrentUnifiedInfoPanelStyle.SegmentedRows,
 ) {
     if (items.isEmpty()) return
     OutlinedCard(
@@ -150,18 +156,37 @@ internal fun TorrentUnifiedInfoPanel(
             containerColor = qbGlassStrongContainerColor(),
         ),
     ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            items.forEachIndexed { index, (label, value) ->
-                TorrentUnifiedInfoRow(
-                    label = label,
-                    value = value,
-                )
-                if (index < items.lastIndex) {
-                    HorizontalDivider(
-                        color = qbGlassOutlineColor(defaultAlpha = 0.18f),
-                    )
+        when (style) {
+            TorrentUnifiedInfoPanelStyle.SegmentedRows -> {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    items.forEachIndexed { index, (label, value) ->
+                        TorrentUnifiedInfoRow(
+                            label = label,
+                            value = value,
+                        )
+                        if (index < items.lastIndex) {
+                            HorizontalDivider(
+                                color = qbGlassOutlineColor(defaultAlpha = 0.18f),
+                            )
+                        }
+                    }
+                }
+            }
+            TorrentUnifiedInfoPanelStyle.Summary -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    items.forEach { (label, value) ->
+                        TorrentUnifiedInfoSummaryItem(
+                            label = label,
+                            value = value,
+                        )
+                    }
                 }
             }
         }
@@ -192,6 +217,29 @@ private fun TorrentUnifiedInfoRow(
             color = MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.weight(0.58f),
+        )
+    }
+}
+
+@Composable
+private fun TorrentUnifiedInfoSummaryItem(
+    label: String,
+    value: String,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.SemiBold,
         )
     }
 }

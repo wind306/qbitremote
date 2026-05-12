@@ -2,8 +2,9 @@
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -26,14 +27,17 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -42,13 +46,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -85,6 +93,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -95,7 +104,9 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -139,6 +150,7 @@ import com.hjw.qbremote.R
 import com.hjw.qbremote.data.CachedDashboardServerSnapshot
 import com.hjw.qbremote.data.ConnectionSettings
 import com.hjw.qbremote.data.ServerBackendType
+import com.hjw.qbremote.data.ServerCapabilities
 import com.hjw.qbremote.data.ServerDashboardPreferences
 import com.hjw.qbremote.data.ServerProfile
 import com.hjw.qbremote.data.defaultCapabilitiesFor
@@ -147,6 +159,7 @@ import com.hjw.qbremote.data.model.CountryUploadRecord
 import com.hjw.qbremote.data.model.TorrentFileInfo
 import com.hjw.qbremote.data.model.TorrentInfo
 import com.hjw.qbremote.data.model.TorrentProperties
+import com.hjw.qbremote.data.model.TorrentTracker
 import com.hjw.qbremote.data.model.TransferInfo
 import com.hjw.qbremote.ui.theme.qbGlassCardColors
 import com.hjw.qbremote.ui.theme.qbGlassChipColor
@@ -155,6 +168,7 @@ import com.hjw.qbremote.ui.theme.qbGlassStrongContainerColor
 import com.hjw.qbremote.ui.theme.qbGlassSubtleContainerColor
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
 import java.time.Instant
@@ -162,6 +176,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.net.URI
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 private data class DashboardStateSummary(
@@ -180,32 +195,61 @@ private data class DashboardStatusPillItem(
     val accentColor: Color,
 )
 
-private data class VerticalReorderSession<T>(
-    val items: List<T>,
-    val indexByItem: Map<T, Int>,
-    val startIndex: Int,
-    val slotTops: List<Float>,
-    val slotCenters: List<Float>,
-    val minOffset: Float,
-    val maxOffset: Float,
-)
-
+@Immutable
 data class PieLegendEntry(
     val label: String,
     val value: Long,
     val valueText: String,
 )
 
-private val HomeServerStackExpandedCardHeight = 188.dp
+private val HomeServerStackExpandedCardHeight = 210.dp
 private val HomeServerStackCollapsedCardHeight = 90.dp
 private val HomeServerStackExposedHeight = 60.dp
 private val DashboardCardSpacing = 10.dp
-internal const val ReorderDraggedScale = 1.018f
-internal const val ReorderDraggedShadow = 18f
-internal const val ReorderSelectedShadow = 22f
-internal const val ReorderCollapsedShadow = 12f
-private const val ServerCardClickSuppressionWindowMs = 140L
+internal const val ServerCardClickSuppressionWindowMs = 140L
 private val ServerCardClickSuppressionDragThreshold = 6.dp
+
+internal fun resolveServerCardClickSuppressionTimestamp(
+    dragDistanceSinceStart: Float,
+    clickSuppressionThresholdPx: Float,
+    currentTimeMillis: Long,
+): Long {
+    return if (dragDistanceSinceStart >= clickSuppressionThresholdPx) {
+        currentTimeMillis
+    } else {
+        0L
+    }
+}
+
+internal fun shouldSuppressServerCardClick(
+    lastDragFinishedAt: Long,
+    currentTimeMillis: Long,
+    suppressionWindowMs: Long = ServerCardClickSuppressionWindowMs,
+): Boolean {
+    if (lastDragFinishedAt <= 0L) return false
+    return currentTimeMillis - lastDragFinishedAt <= suppressionWindowMs
+}
+
+internal data class WalletServerStackCardPresentation(
+    val showExpandedLayout: Boolean,
+    val horizontalPadding: Dp,
+    val verticalPadding: Dp,
+    val borderAlpha: Float,
+)
+
+internal fun resolveWalletServerStackCardPresentation(
+    selected: Boolean,
+    isDragging: Boolean,
+    isSettling: Boolean,
+): WalletServerStackCardPresentation {
+    val showExpandedLayout = selected || isDragging || isSettling
+    return WalletServerStackCardPresentation(
+        showExpandedLayout = showExpandedLayout,
+        horizontalPadding = if (showExpandedLayout) 16.dp else 15.dp,
+        verticalPadding = if (showExpandedLayout) 14.dp else 10.dp,
+        borderAlpha = if (showExpandedLayout) 0.28f else 0.14f,
+    )
+}
 
 private enum class AppPage {
     DASHBOARD,
@@ -218,21 +262,8 @@ private enum class AppPage {
 private data class PageAnimationState(
     val page: AppPage,
     val dashboardSessionKey: String = "",
+    val themeSignature: String = "",
 )
-
-private enum class TorrentListSortOption {
-    ADDED_TIME,
-    UPLOAD_SPEED,
-    DOWNLOAD_SPEED,
-    SHARE_RATIO,
-    TOTAL_UPLOADED,
-    TOTAL_DOWNLOADED,
-    TORRENT_SIZE,
-    ACTIVITY_TIME,
-    SEEDERS,
-    LEECHERS,
-    CROSS_SEED_COUNT,
-}
 
 enum class DashboardChartCard(
     val storageKey: String,
@@ -305,9 +336,6 @@ fun MainScreen(viewModel: MainViewModel) {
     var showDashboardCardManagerSheet by rememberSaveable { mutableStateOf(false) }
     var showTorrentSortMenu by remember { mutableStateOf(false) }
     var showTorrentSearchBar by rememberSaveable { mutableStateOf(false) }
-    var torrentSearchQuery by rememberSaveable { mutableStateOf("") }
-    var torrentListSortOption by rememberSaveable { mutableStateOf(TorrentListSortOption.UPLOAD_SPEED) }
-    var torrentListSortDescending by rememberSaveable { mutableStateOf(true) }
     var sortScrollRequestId by remember { mutableIntStateOf(0) }
     val addTorrentSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val serverProfileSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -367,9 +395,55 @@ fun MainScreen(viewModel: MainViewModel) {
     } else {
         Color.Black.copy(alpha = 0.18f)
     }
-    val crossSeedCounts = remember(state.torrents) {
-        buildCrossSeedCountMap(state.torrents)
+    val pageThemeSignature = remember(
+        state.settings.appTheme,
+        state.settings.customBackgroundToneIsLight,
+        state.settings.customBackgroundImagePath,
+    ) {
+        buildPageThemeSignature(
+            appTheme = state.settings.appTheme,
+            customBackgroundToneIsLight = state.settings.customBackgroundToneIsLight,
+            customBackgroundImagePath = state.settings.customBackgroundImagePath,
+        )
     }
+    val torrentListDisplayState by viewModel.torrentListDisplayState.collectAsStateWithLifecycle()
+    val serverDashboardDisplay by viewModel.serverDashboardDisplayState.collectAsStateWithLifecycle()
+    val torrentListFilterState = torrentListDisplayState.torrentListFilterState
+    val torrentListBaseSnapshot = torrentListDisplayState.torrentListBaseSnapshot
+    val visibleTorrentItems = torrentListDisplayState.visibleTorrentItems
+    val torrentPlacementContextKey = remember(currentPage, state.activeServerProfileId) {
+        "${currentPage.name}:${state.activeServerProfileId.orEmpty()}"
+    }
+    val visibleTorrentItemKeys = remember(visibleTorrentItems) {
+        visibleTorrentItems.map { item -> item.torrent.hash.ifBlank { item.identityKey } }
+    }
+    var previousVisibleTorrentItemKeys by remember { mutableStateOf<List<String>>(emptyList()) }
+    var previousTorrentPlacementContextKey by remember { mutableStateOf<String?>(null) }
+    val comparablePreviousTorrentItemKeys = remember(
+        torrentPlacementContextKey,
+        previousTorrentPlacementContextKey,
+        previousVisibleTorrentItemKeys,
+    ) {
+        if (previousTorrentPlacementContextKey == torrentPlacementContextKey) {
+            previousVisibleTorrentItemKeys
+        } else {
+            emptyList()
+        }
+    }
+    val animateTorrentPlacement = remember(
+        comparablePreviousTorrentItemKeys,
+        visibleTorrentItemKeys,
+    ) {
+        shouldAnimateTorrentPlacement(
+            previousKeys = comparablePreviousTorrentItemKeys,
+            currentKeys = visibleTorrentItemKeys,
+        )
+    }
+    LaunchedEffect(torrentPlacementContextKey, visibleTorrentItemKeys) {
+        previousTorrentPlacementContextKey = torrentPlacementContextKey
+        previousVisibleTorrentItemKeys = visibleTorrentItemKeys.toList()
+    }
+    val crossSeedCounts = torrentListBaseSnapshot.crossSeedCounts
     val activePendingProfileId = remember(state.activeServerProfileId) {
         state.activeServerProfileId.orEmpty()
     }
@@ -377,54 +451,41 @@ fun MainScreen(viewModel: MainViewModel) {
         if (activePendingProfileId.isBlank()) return false
         return state.pendingActionKeys.contains(buildPendingActionKey(activePendingProfileId, hash))
     }
-    val filteredTorrents = remember(state.torrents, torrentSearchQuery) {
-        val query = torrentSearchQuery.trim()
-        if (query.isBlank()) {
-            state.torrents
-        } else {
-            state.torrents.filter { torrent ->
-                matchesTorrentSearch(torrent = torrent, query = query)
-            }
-        }
-    }
-    val visibleTorrents = remember(
-        filteredTorrents,
-        torrentListSortOption,
-        torrentListSortDescending,
-        crossSeedCounts,
-    ) {
-        sortTorrentList(
-            torrents = filteredTorrents,
-            sortOption = torrentListSortOption,
-            descending = torrentListSortDescending,
-            crossSeedCounts = crossSeedCounts,
-        )
-    }
     val categoryOptionsForAdd = remember(state.categoryOptions) {
-        state.categoryOptions
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .distinct()
-            .sorted()
+        buildSortedDistinctTrimmedStrings(state.categoryOptions)
     }
     val tagOptionsForAdd = remember(state.tagOptions) {
-        state.tagOptions
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .distinct()
-            .sorted()
+        buildSortedDistinctTrimmedStrings(state.tagOptions)
     }
     val pathOptionsForAdd = remember(state.torrents) {
-        state.torrents
-            .map { it.savePath.trim() }
-            .filter { it.isNotBlank() }
-            .distinct()
-            .sorted()
+        buildSortedDistinctTrimmedStrings(state.torrents.map { torrent -> torrent.savePath })
     }
-    val selectedTorrent = remember(state.torrents, selectedTorrentIdentity) {
-        state.torrents.firstOrNull { torrentIdentityKey(it) == selectedTorrentIdentity }
+    val selectedTorrent = remember(torrentListBaseSnapshot.torrents, selectedTorrentIdentity) {
+        torrentListBaseSnapshot.torrents.firstOrNull { torrentIdentityKey(it) == selectedTorrentIdentity }
     }
-    val multiServerDashboard = state.serverProfiles.size > 1
+    val showHomeAggregateDashboard = state.serverProfiles.isNotEmpty()
+    val showServerStackReorderUi = state.serverProfiles.size > 1
+    val dashboardServerSnapshotIds = remember(state.dashboardServerSnapshots) {
+        state.dashboardServerSnapshots.map { it.profileId }
+    }
+    var localDashboardServerProfileOrder by remember {
+        mutableStateOf(dashboardServerSnapshotIds)
+    }
+    LaunchedEffect(dashboardServerSnapshotIds) {
+        localDashboardServerProfileOrder = reconcileReorderableItemOrder(
+            currentOrder = localDashboardServerProfileOrder,
+            availableItems = dashboardServerSnapshotIds,
+        )
+    }
+    val orderedDashboardServerSnapshots = remember(
+        state.dashboardServerSnapshots,
+        localDashboardServerProfileOrder,
+    ) {
+        orderDashboardServerSnapshots(
+            snapshots = state.dashboardServerSnapshots,
+            orderedProfileIds = localDashboardServerProfileOrder,
+        )
+    }
     val selectedDashboardProfileId = state.selectedDashboardProfileId
         ?: state.activeServerProfileId
         ?: state.serverProfiles.firstOrNull()?.id
@@ -435,10 +496,10 @@ fun MainScreen(viewModel: MainViewModel) {
         "${selectedDashboardProfileId.orEmpty()}:${state.dashboardSessionToken}"
     }
     val selectedDashboardSnapshot = remember(
-        state.dashboardServerSnapshots,
+        orderedDashboardServerSnapshots,
         selectedDashboardProfileId,
     ) {
-        state.dashboardServerSnapshots.firstOrNull { it.profileId == selectedDashboardProfileId }
+        orderedDashboardServerSnapshots.firstOrNull { it.profileId == selectedDashboardProfileId }
     }
     val selectedServerProfile = remember(state.serverProfiles, selectedDashboardProfileId) {
         state.serverProfiles.firstOrNull { it.id == selectedDashboardProfileId }
@@ -446,57 +507,18 @@ fun MainScreen(viewModel: MainViewModel) {
     val pendingDeleteProfile = remember(pendingDeleteProfileId, state.serverProfiles) {
         state.serverProfiles.firstOrNull { it.id == pendingDeleteProfileId }
     }
-    val selectedDashboardBackendType = selectedServerProfile?.backendType ?: state.settings.serverBackendType
+    val selectedDashboardBackendType = serverDashboardDisplay.backendType
     val serverDashboardCapabilities = remember(selectedDashboardBackendType) {
         defaultCapabilitiesFor(selectedDashboardBackendType)
     }
-    val serverDashboardVersion = remember(selectedDashboardSnapshot) {
-        selectedDashboardSnapshot?.serverVersion?.ifBlank { "-" } ?: "-"
-    }
-    val serverDashboardTransferInfo = remember(selectedDashboardSnapshot) {
-        selectedDashboardSnapshot?.transferInfo ?: TransferInfo()
-    }
-    val serverDashboardTorrents = remember(selectedDashboardSnapshot) {
-        selectedDashboardSnapshot?.torrents.orEmpty()
-    }
-    val serverDashboardTorrentCount = remember(serverDashboardTorrents) {
-        serverDashboardTorrents.size
-    }
-    val serverDashboardTagUploadDate = remember(selectedDashboardSnapshot) {
-        selectedDashboardSnapshot?.dailyTagUploadDate.orEmpty()
-    }
-    val serverDashboardTagUploadStats: List<DailyTagUploadStat> = remember(selectedDashboardSnapshot) {
-        selectedDashboardSnapshot?.dailyTagUploadStats?.map { stat ->
-            DailyTagUploadStat(
-                tag = stat.tag,
-                uploadedBytes = stat.uploadedBytes,
-                torrentCount = stat.torrentCount,
-                isNoTag = stat.isNoTag,
-            )
-        }.orEmpty()
-    }
-    val serverDashboardCountryUploadStats: List<CountryUploadRecord> = remember(selectedDashboardSnapshot) {
-        selectedDashboardSnapshot?.dailyCountryUploadStats.orEmpty()
-    }
-    val serverDashboardHasContent = remember(selectedDashboardSnapshot) {
-        selectedDashboardSnapshot != null
-    }
-    val serverDashboardShowContent = serverDashboardHasContent
-    val availableDashboardCards = remember(selectedDashboardBackendType) {
-        dashboardCardsForBackend(selectedDashboardBackendType)
-    }
-    val currentDashboardPreferences = remember(
-        state.serverDashboardPreferences,
-        selectedServerProfile?.id,
-        state.settings,
-        selectedDashboardBackendType,
-    ) {
-        resolveServerDashboardPreferences(
-            preferences = selectedServerProfile?.id?.let(state.serverDashboardPreferences::get),
-            backendType = selectedDashboardBackendType,
-        )
-    }
-    val showServerStackHint = multiServerDashboard &&
+    val serverDashboardVersion = serverDashboardDisplay.serverVersion
+    val serverDashboardTransferInfo = serverDashboardDisplay.transferInfo
+    val serverDashboardTorrents = serverDashboardDisplay.torrents
+    val serverDashboardTorrentCount = serverDashboardDisplay.torrentCount
+    val serverDashboardShowContent = serverDashboardDisplay.hasContent
+    val availableDashboardCards = serverDashboardDisplay.availableCards
+    val currentDashboardPreferences = serverDashboardDisplay.resolvedPreferences
+    val showServerStackHint = showServerStackReorderUi &&
         !state.settings.hasSeenServerStackReorderHint
     val showDashboardSwipeHint = selectedServerProfile != null &&
         !state.settings.hasSeenServerDashboardSwipeHint
@@ -513,7 +535,7 @@ fun MainScreen(viewModel: MainViewModel) {
     var localVisibleDashboardCardKeys by remember(selectedServerProfile?.id, selectedDashboardBackendType) {
         mutableStateOf(currentDashboardPreferences.visibleCards.toSet())
     }
-    val displayVisibleDashboardCards = remember(
+    val visibleDashboardCards = remember(
         localDashboardCardOrder,
         localVisibleDashboardCardKeys,
     ) {
@@ -521,32 +543,38 @@ fun MainScreen(viewModel: MainViewModel) {
             card.storageKey in localVisibleDashboardCardKeys
         }
     }
+    val displayVisibleDashboardCards = remember(visibleDashboardCards) {
+        buildDashboardDisplayCards(visibleDashboardCards)
+    }
     val dashboardDragGestureKey = remember(displayVisibleDashboardCards) {
-        displayVisibleDashboardCards.joinToString(separator = "|") { it.storageKey }
+        displayVisibleDashboardCards.joinToString(separator = "|") { it.ownerKey }
     }
     val displayDashboardPreferences = remember(
         currentDashboardPreferences,
         localDashboardCardOrder,
         localVisibleDashboardCardKeys,
-        displayVisibleDashboardCards,
+        visibleDashboardCards,
     ) {
         currentDashboardPreferences.copy(
             cardOrder = serializeDashboardCardOrder(localDashboardCardOrder, availableDashboardCards),
-            visibleCards = displayVisibleDashboardCards.map { it.storageKey },
+            visibleCards = visibleDashboardCards.map { it.storageKey },
         )
     }
-    var draggingDashboardCard by remember { mutableStateOf<DashboardChartCard?>(null) }
-    var draggingDashboardOffsetY by remember { mutableFloatStateOf(0f) }
-    var draggingDashboardTargetIndex by remember { mutableIntStateOf(-1) }
-    var draggingDashboardSession by remember { mutableStateOf<VerticalReorderSession<DashboardChartCard>?>(null) }
+    var dashboardDragState by remember { mutableStateOf<VerticalReorderDragState<DashboardDisplayCardItem>?>(null) }
+    var dashboardDropJob by remember { mutableStateOf<Job?>(null) }
+    var dashboardLockedCardHeights by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var revealedDashboardHideCardKey by remember(selectedServerProfile?.id, currentPage) {
         mutableStateOf<String?>(null)
     }
-    val dashboardCardHeights = remember { mutableStateMapOf<DashboardChartCard, Int>() }
-    var draggingServerProfileId by remember { mutableStateOf<String?>(null) }
-    var draggingServerOffsetY by remember { mutableFloatStateOf(0f) }
-    var draggingServerTargetIndex by remember { mutableIntStateOf(-1) }
-    var draggingServerSession by remember { mutableStateOf<VerticalReorderSession<String>?>(null) }
+    val dashboardCardHeights = remember { mutableStateMapOf<String, Int>() }
+    var serverDragState by remember { mutableStateOf<VerticalReorderDragState<String>?>(null) }
+    var serverDropJob by remember { mutableStateOf<Job?>(null) }
+    var serverDragSettling by remember { mutableStateOf(false) }
+    val pageListScrollEnabled = shouldEnablePageListScroll(
+        draggingServerProfileId = serverDragState?.item,
+        draggingDashboardCard = dashboardDragState?.item,
+        settlingServerProfileId = serverDragState?.item.takeIf { serverDragSettling },
+    )
 
     fun listStateForPage(page: AppPage): LazyListState {
         return when (page) {
@@ -663,7 +691,7 @@ fun MainScreen(viewModel: MainViewModel) {
         }
     }
 
-    fun startDashboardCardDrag(card: DashboardChartCard) {
+    fun startDashboardCardDrag(card: DashboardDisplayCardItem) {
         val visibleCards = displayVisibleDashboardCards
         val startIndex = visibleCards.indexOf(card)
         if (startIndex < 0) return
@@ -671,7 +699,7 @@ fun MainScreen(viewModel: MainViewModel) {
         val itemSpacingPx = with(density) { DashboardCardSpacing.toPx() }
         val defaultCardHeightPx = with(density) { 180.dp.toPx() }
         val slotHeights = visibleCards.map { dashboardCard ->
-            dashboardCardHeights[dashboardCard]?.toFloat() ?: defaultCardHeightPx
+            dashboardCardHeights[dashboardCard.ownerKey]?.toFloat() ?: defaultCardHeightPx
         }
         val slotTops = buildList {
             var currentTop = 0f
@@ -681,55 +709,110 @@ fun MainScreen(viewModel: MainViewModel) {
             }
         }
         val edgeSlackPx = with(density) { 24.dp.toPx() }
-        draggingDashboardCard = card
-        draggingDashboardOffsetY = 0f
-        draggingDashboardTargetIndex = startIndex
-        draggingDashboardSession = buildVerticalReorderSession(
+        dashboardDropJob?.cancel()
+        dashboardDropJob = null
+        dashboardDragState = null
+        dashboardLockedCardHeights = visibleCards.associate { dashboardCard ->
+            val measuredHeight = dashboardCardHeights[dashboardCard.ownerKey] ?: defaultCardHeightPx.roundToInt()
+            dashboardCard.ownerKey to measuredHeight
+        }
+        val session = buildVerticalReorderSession(
             items = visibleCards,
             startIndex = startIndex,
             slotTops = slotTops,
             slotHeights = slotHeights,
             edgeSlackPx = edgeSlackPx,
         )
+        dashboardDragState = createVerticalReorderDragState(
+            session = session,
+            item = card,
+        )
+        selectedServerProfile?.id?.let(viewModel::setDashboardReorderHold)
     }
 
-    fun updateDashboardCardDrag(card: DashboardChartCard, deltaY: Float) {
-        val dragSession = draggingDashboardSession ?: return
-        if (draggingDashboardCard != card) return
-        draggingDashboardOffsetY = (draggingDashboardOffsetY + deltaY)
-            .coerceIn(dragSession.minOffset, dragSession.maxOffset)
-        draggingDashboardTargetIndex = resolveVerticalReorderTargetIndex(
-            dragSession,
-            draggingDashboardOffsetY,
+    fun updateDashboardCardDrag(card: DashboardDisplayCardItem, deltaY: Float) {
+        val dragState = dashboardDragState ?: return
+        if (dragState.item != card) return
+        dashboardDragState = applyVerticalReorderDragDelta(
+            state = dragState,
+            deltaY = deltaY,
         )
     }
 
-    fun endDashboardCardDrag() {
-        val draggedCard = draggingDashboardCard ?: return
-        val dragSession = draggingDashboardSession
+    fun finishDashboardCardDrag(commit: Boolean) {
+        val dragState = dashboardDragState ?: return
+        val draggedCard = dragState.item
+        val dragSession = dragState.session
         val previousOrder = localDashboardCardOrder
-        if (dragSession != null && draggingDashboardTargetIndex >= 0) {
-            localDashboardCardOrder = reorderDashboardCardOrder(
+        val finalTargetIndex = resolveVerticalReorderFinalTargetIndex(
+            state = dragState,
+            commit = commit,
+        )
+        val finalOffsetY = resolveVerticalReorderRestingOffset(
+            state = dragState,
+            commit = commit,
+        )
+        val nextOrder = if (commit) {
+            reorderDashboardCardOrderForDisplay(
                 order = localDashboardCardOrder,
-                visibleCards = dragSession.items,
-                card = draggedCard,
-                targetIndex = draggingDashboardTargetIndex,
+                displayCards = dragSession.items,
+                owner = draggedCard.owner,
+                targetIndex = finalTargetIndex,
             )
+        } else {
+            previousOrder
         }
-        draggingDashboardCard = null
-        draggingDashboardOffsetY = 0f
-        draggingDashboardTargetIndex = -1
-        draggingDashboardSession = null
-        persistDashboardCardOrderIfChanged(localDashboardCardOrder, previousOrder)
+        dashboardDropJob?.cancel()
+        dashboardDragState = dragState.copy(targetIndex = finalTargetIndex)
+        dashboardDropJob = scope.launch {
+            val startOffsetY = dashboardDragState?.offsetY ?: dragState.offsetY
+            if (abs(startOffsetY - finalOffsetY) > 0.5f) {
+                val animatable = Animatable(startOffsetY)
+                animatable.animateTo(
+                    targetValue = finalOffsetY,
+                    animationSpec = ReorderSettleAnimationSpec,
+                ) {
+                    dashboardDragState = dashboardDragState?.copy(
+                        offsetY = value,
+                        targetIndex = finalTargetIndex,
+                    )
+                }
+            }
+            val shouldPersistOrder = commit && nextOrder != previousOrder
+            Snapshot.withMutableSnapshot {
+                if (shouldPersistOrder) {
+                    localDashboardCardOrder = nextOrder
+                }
+                dashboardDragState = null
+                dashboardLockedCardHeights = emptyMap()
+                dashboardDropJob = null
+            }
+            if (shouldPersistOrder) {
+                persistDashboardCardOrderIfChanged(nextOrder, previousOrder)
+            }
+            viewModel.setDashboardReorderHold(null)
+        }
     }
 
-    fun hideDashboardCard(card: DashboardChartCard) {
+    fun endDashboardCardDrag() = finishDashboardCardDrag(commit = true)
+
+    fun cancelDashboardCardDrag() = finishDashboardCardDrag(commit = false)
+
+    fun hideDashboardCard(card: DashboardDisplayCardItem) {
         val profileId = selectedServerProfile?.id ?: return
         val previousVisibleKeys = localVisibleDashboardCardKeys
-        val nextVisibleKeys = previousVisibleKeys - card.storageKey
+        val nextVisibleKeys = applyDashboardDisplayCardVisibility(
+            visibleKeys = previousVisibleKeys,
+            displayCard = card,
+            visible = false,
+        )
         localVisibleDashboardCardKeys = nextVisibleKeys
         revealedDashboardHideCardKey = null
-        viewModel.updateServerDashboardCardVisibility(profileId, card, false) { success ->
+        viewModel.updateServerDashboardCardsVisibility(
+            profileId = profileId,
+            cards = card.representedCards,
+            visible = false,
+        ) { success ->
             if (!success && state.activeServerProfileId == profileId) {
                 localVisibleDashboardCardKeys = previousVisibleKeys
             }
@@ -737,64 +820,77 @@ fun MainScreen(viewModel: MainViewModel) {
     }
 
     fun startServerStackDrag(profileId: String) {
-        val orderedIds = state.dashboardServerSnapshots.map { it.profileId }
+        val orderedIds = orderedDashboardServerSnapshots.map { it.profileId }
         val startIndex = orderedIds.indexOf(profileId)
         if (startIndex < 0 || orderedIds.size < 2) return
         val exposedStepPx = with(density) { HomeServerStackExposedHeight.toPx() }
-        val expandedHeightPx = with(density) { HomeServerStackExpandedCardHeight.toPx() }
-        val collapsedHeightPx = with(density) { HomeServerStackCollapsedCardHeight.toPx() }
-        val slotTops = orderedIds.indices.map { index ->
-            if (index == 0) {
-                (orderedIds.lastIndex * exposedStepPx)
-            } else {
-                (orderedIds.lastIndex - index) * exposedStepPx
-            }
-        }
-        val slotHeights = orderedIds.indices.map { index ->
-            if (index == 0) expandedHeightPx else collapsedHeightPx
-        }
         val edgeSlackPx = with(density) { 24.dp.toPx() }
-        draggingServerProfileId = profileId
-        draggingServerOffsetY = 0f
-        draggingServerTargetIndex = startIndex
-        draggingServerSession = buildVerticalReorderSession(
-            items = orderedIds,
+        serverDropJob?.cancel()
+        serverDropJob = null
+        serverDragState = null
+        serverDragSettling = false
+        val session = buildHomeServerStackReorderSession(
+            orderedProfileIds = orderedIds,
             startIndex = startIndex,
-            slotTops = slotTops,
-            slotHeights = slotHeights,
+            exposedStepPx = exposedStepPx,
             edgeSlackPx = edgeSlackPx,
+        )
+        serverDragState = createVerticalReorderDragState(
+            session = session,
+            item = profileId,
         )
     }
 
     fun updateServerStackDrag(profileId: String, deltaY: Float) {
-        val dragSession = draggingServerSession ?: return
-        if (draggingServerProfileId != profileId) return
-        draggingServerOffsetY = (draggingServerOffsetY + deltaY)
-            .coerceIn(dragSession.minOffset, dragSession.maxOffset)
-        draggingServerTargetIndex = resolveVerticalReorderTargetIndex(
-            dragSession,
-            draggingServerOffsetY,
+        val dragState = serverDragState ?: return
+        if (serverDragSettling) return
+        if (dragState.item != profileId) return
+        serverDragState = applyVerticalReorderDragDelta(
+            state = dragState,
+            deltaY = deltaY,
         )
     }
 
-    fun endServerStackDrag() {
-        val profileId = draggingServerProfileId ?: return
-        val dragSession = draggingServerSession
-        if (dragSession != null && draggingServerTargetIndex >= 0) {
-            val reorderedIds = reorderServerProfileIds(
-                current = dragSession.items,
-                profileId = profileId,
-                targetIndex = draggingServerTargetIndex,
-            )
-            if (reorderedIds != dragSession.items) {
-                viewModel.reorderServerProfiles(reorderedIds)
+    fun finishServerStackDrag(commit: Boolean) {
+        val dragState = serverDragState ?: return
+        val dropPlan = resolveHomeServerStackDropPlan(
+            state = dragState,
+            commit = commit,
+        )
+        serverDropJob?.cancel()
+        serverDragSettling = true
+        serverDragState = dragState.copy(targetIndex = dropPlan.finalTargetIndex)
+        serverDropJob = scope.launch {
+            val startOffsetY = serverDragState?.offsetY ?: dragState.offsetY
+            if (abs(startOffsetY - dropPlan.finalOffsetY) > 0.5f) {
+                val animatable = Animatable(startOffsetY)
+                animatable.animateTo(
+                    targetValue = dropPlan.finalOffsetY,
+                    animationSpec = ReorderSettleAnimationSpec,
+                ) {
+                    serverDragState = serverDragState?.copy(
+                        offsetY = value,
+                        targetIndex = dropPlan.finalTargetIndex,
+                    )
+                }
+            }
+            Snapshot.withMutableSnapshot {
+                if (dropPlan.shouldCommitReorder) {
+                    localDashboardServerProfileOrder = dropPlan.reorderedIds
+                }
+                serverDragState = null
+                serverDragSettling = false
+                serverDropJob = null
+            }
+            if (dropPlan.shouldCommitReorder) {
+                viewModel.reorderServerProfiles(dropPlan.reorderedIds)
             }
         }
-        draggingServerProfileId = null
-        draggingServerOffsetY = 0f
-        draggingServerTargetIndex = -1
-        draggingServerSession = null
     }
+
+    fun endServerStackDrag() = finishServerStackDrag(commit = true)
+
+    fun cancelServerStackDrag() = finishServerStackDrag(commit = false)
 
     fun scrollToTopOfCurrentPage(animated: Boolean) {
         scope.launch {
@@ -810,7 +906,7 @@ fun MainScreen(viewModel: MainViewModel) {
     LaunchedEffect(sortScrollRequestId) {
         if (sortScrollRequestId <= 0) return@LaunchedEffect
         if (currentPage != AppPage.TORRENT_LIST) return@LaunchedEffect
-        val targetIndex = if (showTorrentSearchBar && visibleTorrents.isNotEmpty()) 1 else 0
+        val targetIndex = if (showTorrentSearchBar && visibleTorrentItems.isNotEmpty()) 1 else 0
         torrentListState.scrollToItem(targetIndex)
         // Guard against LazyList position restore after data reordering.
         yield()
@@ -820,12 +916,12 @@ fun MainScreen(viewModel: MainViewModel) {
     LaunchedEffect(
         currentPage,
         pendingTorrentReturnIdentity,
-        visibleTorrents,
+        visibleTorrentItems,
         showTorrentSearchBar,
     ) {
         if (currentPage != AppPage.TORRENT_LIST) return@LaunchedEffect
         val anchorIdentity = pendingTorrentReturnIdentity.ifBlank { return@LaunchedEffect }
-        val targetListIndex = visibleTorrents.indexOfFirst { torrentIdentityKey(it) == anchorIdentity }
+        val targetListIndex = visibleTorrentItems.indexOfFirst { it.identityKey == anchorIdentity }
         pendingTorrentReturnIdentity = ""
         if (targetListIndex < 0) return@LaunchedEffect
         val targetIndex = targetListIndex + if (showTorrentSearchBar) 1 else 0
@@ -861,15 +957,20 @@ fun MainScreen(viewModel: MainViewModel) {
     }
 
     LaunchedEffect(currentPage) {
+        if (currentPage != AppPage.DASHBOARD) {
+            serverDropJob?.cancel()
+            serverDropJob = null
+            serverDragState = null
+            serverDragSettling = false
+        }
         if (currentPage != AppPage.SERVER_DASHBOARD) {
             showDashboardCardManagerSheet = false
             revealedDashboardHideCardKey = null
-            draggingDashboardCard = null
-            draggingDashboardOffsetY = 0f
-            draggingDashboardTargetIndex = -1
-            draggingDashboardSession = null
-        }
-        if (currentPage != AppPage.DASHBOARD) {
+            dashboardDropJob?.cancel()
+            dashboardDropJob = null
+            dashboardDragState = null
+            dashboardLockedCardHeights = emptyMap()
+            viewModel.setDashboardReorderHold(null)
         }
     }
 
@@ -991,6 +1092,9 @@ fun MainScreen(viewModel: MainViewModel) {
             }
             Scaffold(
                 containerColor = Color.Transparent,
+                contentWindowInsets = WindowInsets.safeDrawing.only(
+                    WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom,
+                ),
                 topBar = {
                     val compactTorrentTopBar = currentPage == AppPage.TORRENT_LIST
                     TopAppBar(
@@ -1157,14 +1261,14 @@ fun MainScreen(viewModel: MainViewModel) {
                                                 onDismissRequest = { showTorrentSortMenu = false },
                                             ) {
                                                 TorrentListSortOption.entries.forEach { option ->
-                                                    val isSelected = option == torrentListSortOption
+                                                    val isSelected = option == torrentListFilterState.sortOption
                                                     DropdownMenuItem(
                                                         text = {
                                                             val prefix = if (isSelected) "✓ " else ""
                                                             Text("$prefix${torrentListSortLabel(option)}")
                                                         },
                                                         onClick = {
-                                                            torrentListSortOption = option
+                                                            viewModel.updateTorrentListSortOption(option)
                                                             showTorrentSortMenu = false
                                                             requestScrollToFirstTorrentAfterSort()
                                                         },
@@ -1173,22 +1277,22 @@ fun MainScreen(viewModel: MainViewModel) {
                                                 HorizontalDivider()
                                                 DropdownMenuItem(
                                                         text = {
-                                                            val prefix = if (torrentListSortDescending) "✓ " else ""
+                                                            val prefix = if (torrentListFilterState.descending) "✓ " else ""
                                                             Text("${prefix}${stringResource(R.string.sort_descending)}")
                                                         },
                                                     onClick = {
-                                                        torrentListSortDescending = true
+                                                        viewModel.updateTorrentListSortDirection(true)
                                                         showTorrentSortMenu = false
                                                         requestScrollToFirstTorrentAfterSort()
                                                     },
                                                 )
                                                 DropdownMenuItem(
                                                         text = {
-                                                            val prefix = if (!torrentListSortDescending) "✓ " else ""
+                                                            val prefix = if (!torrentListFilterState.descending) "✓ " else ""
                                                             Text("${prefix}${stringResource(R.string.sort_ascending)}")
                                                         },
                                                     onClick = {
-                                                        torrentListSortDescending = false
+                                                        viewModel.updateTorrentListSortDirection(false)
                                                         showTorrentSortMenu = false
                                                         requestScrollToFirstTorrentAfterSort()
                                                     },
@@ -1204,7 +1308,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                             onClick = {
                                                 showTorrentSearchBar = !showTorrentSearchBar
                                                 if (!showTorrentSearchBar) {
-                                                    torrentSearchQuery = ""
+                                                    viewModel.updateTorrentSearchQuery("")
                                                 }
                                                 scope.launch {
                                                     torrentListState.scrollToItem(0)
@@ -1266,7 +1370,7 @@ fun MainScreen(viewModel: MainViewModel) {
                 val showServerDashboardSkeleton = selectedServerProfile != null &&
                     selectedDashboardSnapshot == null &&
                     (state.isConnecting || showRestorePlaceholder)
-                val showDashboardSnapshot = if (multiServerDashboard) {
+                val showDashboardSnapshot = if (showHomeAggregateDashboard) {
                     state.serverProfiles.isNotEmpty()
                 } else {
                     state.connected || state.hasDashboardSnapshot || state.dashboardServerSnapshots.isNotEmpty()
@@ -1275,470 +1379,182 @@ fun MainScreen(viewModel: MainViewModel) {
                 val contentModifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
+                    .consumeWindowInsets(innerPadding)
+                    .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
 
                 val contentList: @Composable (AppPage) -> Unit = { page ->
                     LazyColumn(
                         state = listStateForPage(page),
                         modifier = contentModifier,
+                        userScrollEnabled = pageListScrollEnabled,
                         contentPadding = PaddingValues(12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         when (page) {
-                            AppPage.DASHBOARD -> {
-                                if (showDashboardSnapshot) {
-                                    item {
-                                        if (multiServerDashboard) {
-                                            MultiServerDashboardSection(
-                                                aggregate = state.dashboardAggregate,
-                                                snapshots = state.dashboardServerSnapshots,
-                                                draggingProfileId = draggingServerProfileId,
-                                                draggingOffsetY = draggingServerOffsetY,
-                                                draggingTargetIndex = draggingServerTargetIndex,
-                                                dragSession = draggingServerSession,
-                                                showReorderHint = showServerStackHint,
-                                                onDismissReorderHint = {
-                                                    viewModel.markServerStackReorderHintSeen()
-                                                },
-                                                onStartDrag = { profileId ->
-                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                    viewModel.markServerStackReorderHintSeen()
-                                                    startServerStackDrag(profileId)
-                                                },
-                                                onDragDelta = ::updateServerStackDrag,
-                                                onDragEnd = ::endServerStackDrag,
-                                                onOpenServerDashboard = ::openServerDashboard,
-                                            )
-                                        } else {
-                                            val activeProfileId = state.activeServerProfileId
-                                                ?: state.serverProfiles.firstOrNull()?.id
-                                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                                ServerOverviewCard(
-                                                    overviewTitle = when (
-                                                        state.serverProfiles.firstOrNull { it.id == activeProfileId }?.backendType
-                                                            ?: state.settings.serverBackendType
-                                                    ) {
-                                                        com.hjw.qbremote.data.ServerBackendType.TRANSMISSION -> "Transmission"
-                                                        com.hjw.qbremote.data.ServerBackendType.QBITTORRENT -> stringResource(
-                                                            R.string.brand_qbittorrent
-                                                        )
-                                                    },
-                                                    serverProfiles = state.serverProfiles,
-                                                    activeProfileId = state.activeServerProfileId,
-                                                    serverVersion = state.serverVersion,
-                                                    transferInfo = state.transferInfo,
-                                                    torrents = state.torrents,
-                                                    torrentCount = state.torrents.size,
-                                                    showTotals = true,
-                                                    showEntryHint = !state.settings.homeTorrentEntryHintDismissed,
-                                                    backendType = state.serverProfiles.firstOrNull { it.id == activeProfileId }?.backendType
-                                                        ?: state.settings.serverBackendType,
-                                                    onCardClick = {
-                                                        activeProfileId?.let(::openServerDashboard)
-                                                    },
-                                                    onDismissEntryHint = viewModel::dismissHomeTorrentEntryHint,
-                                                    onOpenTorrentList = ::openTorrentListFromDashboard,
-                                                    onSwitchServerProfile = viewModel::switchServerProfile,
-                                                    onEditServerProfile = { profileId -> openServerProfileSheet(profileId) },
-                                                    onRequestDeleteServerProfile = ::requestDeleteServerProfile,
-                                                    swipeActionsEnabled = false,
-                                                    showSwipeHint = false,
-                                                    onDismissSwipeHint = {},
-                                                )
-                                            }
-                                        }
-                                    }
-                                } else if (showDashboardSkeleton) {
-                                    item {
-                                        DashboardHomeSkeleton(
-                                            showCharts = false,
-                                        )
-                                    }
-                                } else {
-                                    item {
-                                        NeedConnectionCard(
-                                            onOpenConnection = { openSettings() },
-                                        )
-                                    }
-                                }
-                            }
+                            AppPage.DASHBOARD -> dashboardHomePageContent(
+                                state = state,
+                                dashboardServerSnapshots = orderedDashboardServerSnapshots,
+                                showDashboardSnapshot = showDashboardSnapshot,
+                                showHomeAggregateDashboard = showHomeAggregateDashboard,
+                                showDashboardSkeleton = showDashboardSkeleton,
+                                showServerStackHint = showServerStackHint,
+                                draggingProfileId = serverDragState?.item,
+                                settlingProfileId = serverDragState?.item.takeIf { serverDragSettling },
+                                draggingOffsetY = { if (serverDragSettling) 0f else (serverDragState?.offsetY ?: 0f) },
+                                settlingOffsetY = { if (serverDragSettling) (serverDragState?.offsetY ?: 0f) else 0f },
+                                draggingTargetIndex = serverDragState?.targetIndex ?: -1,
+                                dragSession = serverDragState?.session,
+                                onDismissReorderHint = viewModel::markServerStackReorderHintSeen,
+                                onStartServerStackDrag = { profileId ->
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    viewModel.markServerStackReorderHintSeen()
+                                    startServerStackDrag(profileId)
+                                },
+                                onDragServerStack = ::updateServerStackDrag,
+                                onEndServerStackDrag = ::endServerStackDrag,
+                                onCancelServerStackDrag = ::cancelServerStackDrag,
+                                onOpenServerDashboard = ::openServerDashboard,
+                                onDismissHomeTorrentEntryHint = viewModel::dismissHomeTorrentEntryHint,
+                                onOpenTorrentList = ::openTorrentListFromDashboard,
+                                onSwitchServerProfile = viewModel::switchServerProfile,
+                                onEditServerProfile = { profileId -> openServerProfileSheet(profileId) },
+                                onRequestDeleteServerProfile = ::requestDeleteServerProfile,
+                                onOpenConnection = ::openSettings,
+                            )
 
-                            AppPage.SERVER_DASHBOARD -> {
-                                if (selectedServerProfile != null && serverDashboardShowContent) {
-                                    item(key = "server_dashboard_overview_$serverDashboardSessionKey") {
-                                        AnimatedVisibility(
-                                            visible = true,
-                                            enter = fadeIn(animationSpec = tween(120)),
-                                            exit = fadeOut(animationSpec = tween(90)),
-                                        ) {
-                                            ServerOverviewCard(
-                                                overviewTitle = when (selectedServerProfile.backendType) {
-                                                    com.hjw.qbremote.data.ServerBackendType.TRANSMISSION -> "Transmission"
-                                                    com.hjw.qbremote.data.ServerBackendType.QBITTORRENT -> stringResource(
-                                                        R.string.brand_qbittorrent
-                                                    )
-                                                },
-                                                backendType = selectedServerProfile.backendType,
-                                                serverProfiles = listOf(selectedServerProfile),
-                                                activeProfileId = selectedServerProfile.id,
-                                                serverVersion = serverDashboardVersion,
-                                                transferInfo = serverDashboardTransferInfo,
-                                                torrents = serverDashboardTorrents,
-                                                torrentCount = serverDashboardTorrentCount,
-                                                showTotals = true,
-                                                showEntryHint = false,
-                                                onCardClick = null,
-                                                onDismissEntryHint = viewModel::dismissHomeTorrentEntryHint,
-                                                onOpenTorrentList = ::openTorrentListFromDashboard,
-                                                onSwitchServerProfile = viewModel::switchServerProfile,
-                                                onEditServerProfile = { profileId -> openServerProfileSheet(profileId) },
-                                                onRequestDeleteServerProfile = ::requestDeleteServerProfile,
-                                                swipeActionsEnabled = true,
-                                                showSwipeHint = showDashboardSwipeHint,
-                                                onDismissSwipeHint = {
-                                                    viewModel.markServerDashboardSwipeHintSeen()
-                                                },
-                                            )
-                                        }
-                                    }
-                                    if (showDashboardCardHint) {
-                                        item(key = "server_dashboard_chart_hint_$serverDashboardSessionKey") {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.End,
-                                            ) {
-                                                DashboardEntryHintBubble(
-                                                    text = stringResource(R.string.dashboard_chart_reorder_hint),
-                                                    dismissDescription = stringResource(R.string.dismiss_hint),
-                                                    onDismiss = {
-                                                        viewModel.markServerDashboardCardHintSeen()
-                                                    },
-                                                )
-                                            }
-                                        }
-                                    }
-                                    if (displayVisibleDashboardCards.isEmpty()) {
-                                        item(key = "server_dashboard_chart_empty_$serverDashboardSessionKey") {
-                                            DashboardManagementEmptyCard(
-                                                onOpenManager = {
-                                                    viewModel.markServerDashboardCardHintSeen()
-                                                    showDashboardCardManagerSheet = true
-                                                },
-                                            )
-                                        }
-                                    } else {
-                                        items(
-                                            items = displayVisibleDashboardCards,
-                                            key = { "$serverDashboardSessionKey:${it.storageKey}" },
-                                        ) { card ->
-                                            ReorderableDashboardCard(
-                                                card = card,
-                                                gestureKey = dashboardDragGestureKey,
-                                                isDragging = draggingDashboardCard == card,
-                                                dragOffsetY = if (draggingDashboardCard == card) {
-                                                    draggingDashboardOffsetY
-                                                } else {
-                                                    0f
-                                                },
-                                                siblingOffsetY = calculateDashboardSiblingOffset(
-                                                    card = card,
-                                                    draggingCard = draggingDashboardCard,
-                                                    draggingTargetIndex = draggingDashboardTargetIndex,
-                                                    dragSession = draggingDashboardSession,
-                                                ),
-                                                onDragStart = {
-                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                    viewModel.markServerDashboardCardHintSeen()
-                                                    startDashboardCardDrag(card)
-                                                },
-                                                onDragDelta = { deltaY -> updateDashboardCardDrag(card, deltaY) },
-                                                onDragEnd = { endDashboardCardDrag() },
-                                                onMeasured = { height -> dashboardCardHeights[card] = height },
-                                            ) {
-                                                when (card) {
-                                                    DashboardChartCard.COUNTRY_FLOW -> {
-                                                        CountryFlowMapCard(
-                                                            stats = if (serverDashboardCapabilities.supportsCountryDistribution) {
-                                                                serverDashboardCountryUploadStats
-                                                            } else {
-                                                                emptyList()
-                                                            },
-                                                            coverageNote = "",
-                                                            showHideButton = revealedDashboardHideCardKey == card.storageKey,
-                                                            onRevealHide = { revealedDashboardHideCardKey = card.storageKey },
-                                                            onHide = { hideDashboardCard(card) },
-                                                        )
-                                                    }
-
-                                                    DashboardChartCard.CATEGORY_SHARE -> {
-                                                        if (selectedDashboardBackendType == ServerBackendType.TRANSMISSION) {
-                                                            TransmissionLabelCategoryPieCard(
-                                                                torrents = serverDashboardTorrents,
-                                                                showHideButton = revealedDashboardHideCardKey == card.storageKey,
-                                                                onRevealHide = { revealedDashboardHideCardKey = card.storageKey },
-                                                                onHide = { hideDashboardCard(card) },
-                                                            )
-                                                        } else {
-                                                            CategorySharePieCard(
-                                                                torrents = if (serverDashboardCapabilities.supportsCategories) {
-                                                                    serverDashboardTorrents
-                                                                } else {
-                                                                    emptyList()
-                                                                },
-                                                                coverageNote = "",
-                                                                showHideButton = revealedDashboardHideCardKey == card.storageKey,
-                                                                onRevealHide = { revealedDashboardHideCardKey = card.storageKey },
-                                                                onHide = { hideDashboardCard(card) },
-                                                            )
-                                                        }
-                                                    }
-
-                                                    DashboardChartCard.DAILY_UPLOAD -> {
-                                                        DailyTagUploadPieCard(
-                                                            date = serverDashboardTagUploadDate,
-                                                            stats = serverDashboardTagUploadStats,
-                                                            showHideButton = revealedDashboardHideCardKey == card.storageKey,
-                                                            onRevealHide = { revealedDashboardHideCardKey = card.storageKey },
-                                                            onHide = { hideDashboardCard(card) },
-                                                        )
-                                                    }
-
-                                                    DashboardChartCard.TAG_UPLOAD -> {
-                                                        DailyTagUploadPieCard(
-                                                            date = serverDashboardTagUploadDate,
-                                                            stats = serverDashboardTagUploadStats,
-                                                            titleOverride = stringResource(R.string.dashboard_tag_upload_share_title),
-                                                            showHideButton = revealedDashboardHideCardKey == card.storageKey,
-                                                            onRevealHide = { revealedDashboardHideCardKey = card.storageKey },
-                                                            onHide = { hideDashboardCard(card) },
-                                                        )
-                                                    }
-
-                                                    DashboardChartCard.TORRENT_STATE -> {
-                                                        TransmissionStatePieCard(
-                                                            torrents = serverDashboardTorrents,
-                                                            showHideButton = revealedDashboardHideCardKey == card.storageKey,
-                                                            onRevealHide = { revealedDashboardHideCardKey = card.storageKey },
-                                                            onHide = { hideDashboardCard(card) },
-                                                        )
-                                                    }
-
-                                                    DashboardChartCard.TRACKER_SITE -> {
-                                                        TransmissionTrackerSitePieCard(
-                                                            torrents = serverDashboardTorrents,
-                                                            showHideButton = revealedDashboardHideCardKey == card.storageKey,
-                                                            onRevealHide = { revealedDashboardHideCardKey = card.storageKey },
-                                                            onHide = { hideDashboardCard(card) },
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                } else if (showServerDashboardSkeleton || showRestorePlaceholder) {
-                                    item(key = "server_dashboard_loading_$serverDashboardSessionKey") {
-                                        AnimatedVisibility(
-                                            visible = true,
-                                            enter = fadeIn(animationSpec = tween(120)),
-                                            exit = fadeOut(animationSpec = tween(90)),
-                                        ) {
-                                            ServerDashboardSkeleton()
-                                        }
-                                    }
-                                } else {
-                                    item {
-                                        NeedConnectionCard(
-                                            onOpenConnection = { openSettings() },
-                                        )
-                                    }
-                                }
-                            }
+                            AppPage.SERVER_DASHBOARD -> serverDashboardRootPageContent(
+                                sessionKey = serverDashboardSessionKey,
+                                selectedServerProfile = selectedServerProfile,
+                                showContent = serverDashboardShowContent,
+                                showDashboardCardHint = showDashboardCardHint,
+                                showDashboardSwipeHint = showDashboardSwipeHint,
+                                showSkeleton = showServerDashboardSkeleton,
+                                showRestorePlaceholder = showRestorePlaceholder,
+                                selectedDashboardBackendType = selectedDashboardBackendType,
+                                serverDashboardCapabilities = serverDashboardCapabilities,
+                                serverDashboardDisplay = serverDashboardDisplay,
+                                serverDashboardVersion = serverDashboardVersion,
+                                serverDashboardTransferInfo = serverDashboardTransferInfo,
+                                serverDashboardTorrents = serverDashboardTorrents,
+                                serverDashboardTorrentCount = serverDashboardTorrentCount,
+                                displayVisibleDashboardCards = displayVisibleDashboardCards,
+                                dashboardDragGestureKey = dashboardDragGestureKey,
+                                draggingDashboardCard = dashboardDragState?.item,
+                                settlingDashboardCard = null,
+                                draggingDashboardOffsetY = { dashboardDragState?.offsetY ?: 0f },
+                                settlingDashboardOffsetY = { 0f },
+                                draggingDashboardTargetIndex = dashboardDragState?.targetIndex ?: -1,
+                                draggingDashboardSession = dashboardDragState?.session,
+                                revealedDashboardHideCardKey = revealedDashboardHideCardKey,
+                                dashboardCardHeights = dashboardCardHeights,
+                                dashboardLockedCardHeights = dashboardLockedCardHeights,
+                                onRevealHideCard = { card -> revealedDashboardHideCardKey = card.ownerKey },
+                                onHideCard = ::hideDashboardCard,
+                                onStartCardDrag = { card ->
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    startDashboardCardDrag(card)
+                                },
+                                onDragCard = ::updateDashboardCardDrag,
+                                onEndCardDrag = ::endDashboardCardDrag,
+                                onCancelCardDrag = ::cancelDashboardCardDrag,
+                                onOpenManager = {
+                                    viewModel.markServerDashboardCardHintSeen()
+                                    showDashboardCardManagerSheet = true
+                                },
+                                onOpenTorrentList = ::openTorrentListFromDashboard,
+                                onSwitchServerProfile = viewModel::switchServerProfile,
+                                onEditServerProfile = { profileId -> openServerProfileSheet(profileId) },
+                                onRequestDeleteServerProfile = ::requestDeleteServerProfile,
+                                onDismissHomeTorrentEntryHint = viewModel::dismissHomeTorrentEntryHint,
+                                onMarkDashboardSwipeHintSeen = viewModel::markServerDashboardSwipeHintSeen,
+                                onMarkDashboardCardHintSeen = viewModel::markServerDashboardCardHintSeen,
+                                onOpenConnection = ::openSettings,
+                            )
 
                             AppPage.TORRENT_LIST -> {
-                                if (showTorrentListContent) {
-                                    if (showTorrentSearchBar) {
-                                        stickyHeader(key = "torrent_search_bar") {
-                                            OutlinedTextField(
-                                                value = torrentSearchQuery,
-                                                onValueChange = { torrentSearchQuery = it },
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .background(qbGlassStrongContainerColor())
-                                                    .padding(bottom = 8.dp),
-                                                label = { Text(stringResource(R.string.search_torrent_label)) },
-                                                placeholder = { Text(stringResource(R.string.search_torrent_placeholder)) },
-                                                singleLine = true,
-                                            )
-                                        }
-                                    }
-                                    items(
-                                        items = visibleTorrents,
-                                        key = { it.hash.ifBlank { it.name } },
-                                    ) { torrent ->
-                                        Box(
-                                            modifier = Modifier.animateItemPlacement(
-                                                animationSpec = spring(
-                                                    dampingRatio = 0.78f,
-                                                    stiffness = 380f,
-                                                )
-                                            )
-                                        ) {
-                                            TorrentCard(
-                                                torrent = torrent,
-                                                crossSeedCount = crossSeedCounts[torrentIdentityKey(torrent)] ?: 0,
-                                                isPending = isPendingAction(torrent.hash),
-                                                onOpenDetails = { openTorrentDetail(torrent) },
-                                            )
-                                        }
-                                    }
-                                    if (visibleTorrents.isEmpty()) {
-                                        item {
-                                            Text(
-                                                text = stringResource(R.string.no_torrent_data),
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                            )
-                                        }
-                                    }
-                                } else if (showRestorePlaceholder) {
-                                    item {
-                                        PageRestorePlaceholder()
-                                    }
-                                } else {
-                                    item {
-                                        NeedConnectionCard(
-                                            onOpenConnection = { openSettings() },
-                                        )
-                                    }
-                                }
+                                torrentListPageContent(
+                                    showContent = showTorrentListContent,
+                                    showRestorePlaceholder = showRestorePlaceholder,
+                                    showSearchBar = showTorrentSearchBar,
+                                    animatePlacement = animateTorrentPlacement,
+                                    searchQuery = torrentListFilterState.query,
+                                    onSearchQueryChange = viewModel::updateTorrentSearchQuery,
+                                    filterState = torrentListFilterState,
+                                    onStateFilterChange = viewModel::updateTorrentListStateFilter,
+                                    onCategoryFilterChange = viewModel::updateTorrentListCategoryFilter,
+                                    onTagFilterChange = viewModel::updateTorrentListTagFilter,
+                                    categoryOptions = state.categoryOptions,
+                                    tagOptions = state.tagOptions,
+                                    visibleItems = visibleTorrentItems,
+                                    isPendingAction = ::isPendingAction,
+                                    onOpenDetails = ::openTorrentDetail,
+                                    onOpenConnection = { openSettings() },
+                                )
                             }
 
-                            AppPage.TORRENT_DETAIL -> {
-                                val torrent = selectedTorrent
-                                if (torrent == null) {
-                                    if (showTorrentDetailRestorePlaceholder) {
-                                        item {
-                                            PageRestorePlaceholder()
-                                        }
-                                    } else {
-                                        item {
-                                            Text(
-                                                text = stringResource(R.string.torrent_detail_not_found),
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                            )
-                                        }
-                                    }
-                                } else {
-                                    item(key = "torrent_detail_card") {
-                                        AnimatedContent(
-                                            targetState = torrent.hash,
-                                            transitionSpec = {
-                                                fadeIn(animationSpec = tween(durationMillis = 200)) togetherWith
-                                                    fadeOut(animationSpec = tween(durationMillis = 120))
-                                            },
-                                            label = "torrentDetailCard",
-                                        ) { targetHash ->
-                                            TorrentOperationDetailCard(
-                                                torrent = torrent,
-                                                crossSeedCount = crossSeedCounts[torrentIdentityKey(torrent)] ?: 0,
-                                                isPending = isPendingAction(targetHash),
-                                                capabilities = state.activeCapabilities,
-                                                detailLoading = state.detailLoading && state.detailHash == targetHash,
-                                                detailProperties = if (state.detailHash == targetHash) state.detailProperties else null,
-                                                detailFiles = if (state.detailHash == targetHash) state.detailFiles else emptyList(),
-                                                detailTrackers = if (state.detailHash == targetHash) state.detailTrackers else emptyList(),
-                                                magnetUri = buildMagnetUri(
-                                                    hash = targetHash,
-                                                    name = torrent.name,
-                                                    trackerUrls = if (state.detailHash == targetHash) {
-                                                        state.detailTrackers.map { it.url }
-                                                    } else {
-                                                        emptyList()
-                                                    },
-                                                ),
-                                                categoryOptions = state.categoryOptions,
-                                                tagOptions = state.tagOptions,
-                                                deleteFilesDefault = state.settings.deleteFilesDefault,
-                                                deleteFilesWhenNoSeeders = state.settings.deleteFilesWhenNoSeeders,
-                                                onCopyHash = {
-                                                    copyToClipboard(targetHash, R.string.detail_hash_copied)
-                                                },
-                                                onCopyMagnet = { magnetUri ->
+                            AppPage.TORRENT_DETAIL -> torrentDetailPageContent(
+                                selectedTorrent = selectedTorrent,
+                                selectedTorrentIdentity = selectedTorrentIdentity,
+                                showRestorePlaceholder = showTorrentDetailRestorePlaceholder,
+                                crossSeedCounts = crossSeedCounts,
+                                state = state,
+                                isPendingAction = ::isPendingAction,
+                                onCopyHash = { hash ->
+                                    copyToClipboard(hash, R.string.detail_hash_copied)
+                                },
+                                onCopyMagnet = { magnetUri ->
                                                     copyToClipboard(magnetUri, R.string.detail_magnet_copied)
-                                                },
-                                                onExportTorrent = {
+                                },
+                                onExportTorrent = { hash, name ->
                                                     requestTorrentExport(
-                                                        hash = targetHash,
-                                                        torrentName = torrent.name,
+                                                        hash = hash,
+                                                        torrentName = name,
                                                     )
-                                                },
-                                                onPause = { viewModel.pauseTorrent(targetHash) },
-                                                onResume = { viewModel.resumeTorrent(targetHash) },
-                                                onDelete = { deleteFiles ->
-                                                    viewModel.deleteTorrent(targetHash, deleteFiles)
-                                                },
-                                                onRename = { viewModel.renameTorrent(targetHash, it) },
-                                                onSetLocation = { viewModel.setTorrentLocation(targetHash, it) },
-                                                onSetCategory = { viewModel.setTorrentCategory(targetHash, it) },
-                                                onSetTags = { oldTags, newTags ->
-                                                    viewModel.setTorrentTags(targetHash, oldTags, newTags)
-                                                },
-                                                onSetSpeedLimit = { dl, up ->
-                                                    viewModel.setTorrentSpeedLimit(targetHash, dl, up)
-                                                },
-                                                onSetShareRatio = { ratio ->
-                                                    viewModel.setTorrentShareRatio(targetHash, ratio)
-                                                },
-                                                onReannounce = { viewModel.reannounceTorrent(targetHash) },
-                                                onRecheck = { viewModel.recheckTorrent(targetHash) },
-                                                onCopyTracker = { tracker ->
-                                                    copyToClipboard(tracker.url, R.string.detail_tracker_copied)
-                                                },
-                                                onEditTracker = { tracker, newUrl ->
-                                                    viewModel.editTracker(targetHash, tracker, newUrl)
-                                                },
-                                                onDeleteTracker = { tracker ->
-                                                    viewModel.removeTracker(targetHash, tracker)
-                                                },
-                                            )
-                                        }
-                                    }
-                                }
-                            }
+                                },
+                                onPauseTorrent = viewModel::pauseTorrent,
+                                onResumeTorrent = viewModel::resumeTorrent,
+                                onDeleteTorrent = viewModel::deleteTorrent,
+                                onRenameTorrent = viewModel::renameTorrent,
+                                onSetTorrentLocation = viewModel::setTorrentLocation,
+                                onSetTorrentCategory = viewModel::setTorrentCategory,
+                                onSetTorrentTags = viewModel::setTorrentTags,
+                                onSetTorrentSpeedLimit = viewModel::setTorrentSpeedLimit,
+                                onSetTorrentShareRatio = viewModel::setTorrentShareRatio,
+                                onReannounceTorrent = viewModel::reannounceTorrent,
+                                onRecheckTorrent = viewModel::recheckTorrent,
+                                onCopyTracker = { tracker ->
+                                    copyToClipboard(tracker.url, R.string.detail_tracker_copied)
+                                },
+                                onEditTracker = { hash, tracker, newUrl ->
+                                    viewModel.editTracker(hash, tracker, newUrl)
+                                },
+                                onDeleteTracker = { hash, tracker ->
+                                    viewModel.removeTracker(hash, tracker)
+                                },
+                            )
 
-                            AppPage.SETTINGS -> {
-                                item {
-                                    SettingsPageContent(
-                                        settings = state.settings,
-                                        onAppLanguageChange = viewModel::updateAppLanguage,
-                                        onDeleteFilesWhenNoSeedersChange = viewModel::updateDeleteFilesWhenNoSeeders,
-                                        onDeleteFilesDefaultChange = viewModel::updateDeleteFilesDefault,
-                                    )
-                                }
-                                if (state.serverProfiles.isEmpty()) {
-                                    item {
-                                        ConnectionCard(
-                                            state = state,
-                                            onBackendTypeChange = viewModel::updateServerBackendType,
-                                            onHostChange = viewModel::updateHost,
-                                            onPortChange = viewModel::updatePort,
-                                            onHttpsChange = viewModel::updateUseHttps,
-                                            onUserChange = viewModel::updateUsername,
-                                            onPasswordChange = viewModel::updatePassword,
-                                            onRefreshSecondsChange = viewModel::updateRefreshSeconds,
-                                            onConnect = {
-                                                viewModel.connect()
-                                                currentPage = AppPage.DASHBOARD
-                                            },
-                                        )
-                                    }
-                                }
-                            }
+                            AppPage.SETTINGS -> settingsRootPageContent(
+                                state = state,
+                                onAppLanguageChange = viewModel::updateAppLanguage,
+                                onDeleteFilesWhenNoSeedersChange = viewModel::updateDeleteFilesWhenNoSeeders,
+                                onDeleteFilesDefaultChange = viewModel::updateDeleteFilesDefault,
+                                onBackendTypeChange = viewModel::updateServerBackendType,
+                                onHostChange = viewModel::updateHost,
+                                onPortChange = viewModel::updatePort,
+                                onHttpsChange = viewModel::updateUseHttps,
+                                onUserChange = viewModel::updateUsername,
+                                onPasswordChange = viewModel::updatePassword,
+                                onRefreshSecondsChange = viewModel::updateRefreshSeconds,
+                                onConnect = {
+                                    viewModel.connect()
+                                    currentPage = AppPage.DASHBOARD
+                                },
+                            )
                         }
                     }
                 }
 
-                val animatedPageTarget = remember(currentPage, serverDashboardSessionKey) {
+                val animatedPageTarget = remember(currentPage, serverDashboardSessionKey, pageThemeSignature) {
                     PageAnimationState(
                         page = currentPage,
                         dashboardSessionKey = if (currentPage == AppPage.SERVER_DASHBOARD) {
@@ -1746,6 +1562,7 @@ fun MainScreen(viewModel: MainViewModel) {
                         } else {
                             ""
                         },
+                        themeSignature = pageThemeSignature,
                     )
                 }
                 val animatedPageContent: @Composable () -> Unit = {
@@ -1757,7 +1574,7 @@ fun MainScreen(viewModel: MainViewModel) {
                         },
                         label = "pageAnimation",
                     ) { pageState ->
-                        key(pageState.page, pageState.dashboardSessionKey) {
+                        key(pageState.page, pageState.dashboardSessionKey, pageState.themeSignature) {
                             contentList(pageState.page)
                         }
                     }
@@ -1799,6 +1616,9 @@ fun MainScreen(viewModel: MainViewModel) {
                     sheetState = serverProfileSheetState,
                     containerColor = qbGlassStrongContainerColor(),
                     shape = PanelShape,
+                    windowInsets = WindowInsets.safeDrawing.only(
+                        WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom,
+                    ),
                 ) {
                     ServerProfileSheet(
                         profiles = state.serverProfiles,
@@ -1855,6 +1675,9 @@ fun MainScreen(viewModel: MainViewModel) {
                     sheetState = addTorrentSheetState,
                     containerColor = qbGlassStrongContainerColor(),
                     shape = PanelShape,
+                    windowInsets = WindowInsets.safeDrawing.only(
+                        WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom,
+                    ),
                 ) {
                     AddTorrentSheet(
                         context = localContext,
@@ -1862,7 +1685,11 @@ fun MainScreen(viewModel: MainViewModel) {
                         categoryOptions = categoryOptionsForAdd,
                         tagOptions = tagOptionsForAdd,
                         pathOptions = pathOptionsForAdd,
-                        onCancel = { showAddTorrentSheet = false },
+                        initialUrls = state.sharedMagnetUrl,
+                        onCancel = {
+                            showAddTorrentSheet = false
+                            viewModel.clearSharedMagnetUrl()
+                        },
                         onAdd = { urls, files, autoTmm, category, tags, savePath, paused, skipChecking, sequential, firstLast, upKb, dlKb ->
                             viewModel.addTorrent(
                                 urls = urls,
@@ -1890,6 +1717,9 @@ fun MainScreen(viewModel: MainViewModel) {
                     sheetState = dashboardCardManagerSheetState,
                     containerColor = qbGlassStrongContainerColor(),
                     shape = PanelShape,
+                    windowInsets = WindowInsets.safeDrawing.only(
+                        WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom,
+                    ),
                 ) {
                     ServerDashboardCardManagerSheet(
                         availableCards = availableDashboardCards,
@@ -1916,7 +1746,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             val currentProfileId = selectedServerProfile.id
                             val previousOrder = localDashboardCardOrder
                             val previousVisibleKeys = localVisibleDashboardCardKeys
-                            val defaults = defaultServerDashboardPreferences(selectedDashboardBackendType)
+                            val defaults = defaultServerDashboardPreferencesForBackend(selectedDashboardBackendType)
                             localDashboardCardOrder = parseDashboardCardOrder(
                                 defaults.cardOrder,
                                 availableDashboardCards,
@@ -2012,7 +1842,6 @@ fun MainScreen(viewModel: MainViewModel) {
         }
     }
 }
-
 
 @Composable
 private fun CrossSeedDetailSummaryCard(
@@ -2211,7 +2040,7 @@ private fun CrossSeedDetailCard(torrent: TorrentInfo) {
 }
 
 @Composable
-private fun ServerOverviewCard(
+internal fun ServerOverviewCard(
     overviewTitle: String,
     backendType: ServerBackendType,
     serverProfiles: List<ServerProfile>,
@@ -2325,9 +2154,7 @@ private fun ServerOverviewCard(
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .fillMaxHeight()
-                    .width(actionWidth)
-                    .clip(PanelShape)
-                    .background(qbGlassStrongContainerColor()),
+                    .width(actionWidth),
                 contentAlignment = Alignment.Center,
             ) {
                 Row(
@@ -2529,11 +2356,13 @@ private fun ServerOverviewCard(
 }
 
 @Composable
-private fun MultiServerDashboardSection(
+internal fun MultiServerDashboardSection(
     aggregate: DashboardAggregateState,
     snapshots: List<CachedDashboardServerSnapshot>,
     draggingProfileId: String?,
-    draggingOffsetY: Float,
+    settlingProfileId: String?,
+    draggingOffsetY: () -> Float,
+    settlingOffsetY: () -> Float,
     draggingTargetIndex: Int,
     dragSession: VerticalReorderSession<String>?,
     showReorderHint: Boolean,
@@ -2541,6 +2370,7 @@ private fun MultiServerDashboardSection(
     onStartDrag: (String) -> Unit,
     onDragDelta: (String, Float) -> Unit,
     onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
     onOpenServerDashboard: (String) -> Unit,
 ) {
     Column(
@@ -2553,7 +2383,9 @@ private fun MultiServerDashboardSection(
         WalletServerCardStack(
             snapshots = snapshots,
             draggingProfileId = draggingProfileId,
+            settlingProfileId = settlingProfileId,
             draggingOffsetY = draggingOffsetY,
+            settlingOffsetY = settlingOffsetY,
             draggingTargetIndex = draggingTargetIndex,
             dragSession = dragSession,
             showReorderHint = showReorderHint,
@@ -2561,6 +2393,7 @@ private fun MultiServerDashboardSection(
             onStartDrag = onStartDrag,
             onDragDelta = onDragDelta,
             onDragEnd = onDragEnd,
+            onDragCancel = onDragCancel,
             onOpenServerDashboard = onOpenServerDashboard,
         )
     }
@@ -2660,7 +2493,9 @@ private fun AggregateSpeedTextLine(
 private fun WalletServerCardStack(
     snapshots: List<CachedDashboardServerSnapshot>,
     draggingProfileId: String?,
-    draggingOffsetY: Float,
+    settlingProfileId: String?,
+    draggingOffsetY: () -> Float,
+    settlingOffsetY: () -> Float,
     draggingTargetIndex: Int,
     dragSession: VerticalReorderSession<String>?,
     showReorderHint: Boolean,
@@ -2668,6 +2503,7 @@ private fun WalletServerCardStack(
     onStartDrag: (String) -> Unit,
     onDragDelta: (String, Float) -> Unit,
     onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
     onOpenServerDashboard: (String) -> Unit,
 ) {
     val orderedSnapshots = snapshots
@@ -2678,6 +2514,9 @@ private fun WalletServerCardStack(
             .sorted()
             .mapIndexed { index, profileId -> profileId to index }
             .toMap()
+    }
+    val serverStackGestureKey = remember(orderedSnapshots) {
+        orderedSnapshots.joinToString(separator = "|") { it.profileId }
     }
     val stackHeight = if (orderedSnapshots.isEmpty()) {
         0.dp
@@ -2722,36 +2561,45 @@ private fun WalletServerCardStack(
                 .height(stackHeight),
         ) {
             orderedSnapshots.withIndex().toList().asReversed().forEach { (index, snapshot) ->
-                WalletServerStackCard(
-                    snapshot = snapshot,
-                    stackedIndex = index,
-                    paletteIndex = paletteIndexByProfileId[snapshot.profileId] ?: index,
-                    cardHeight = HomeServerStackExpandedCardHeight,
-                    collapsedCardHeight = HomeServerStackCollapsedCardHeight,
-                    exposedHeight = HomeServerStackExposedHeight,
-                    selected = index == 0,
-                    stackCount = orderedSnapshots.size,
-                    isDragging = draggingProfileId == snapshot.profileId,
-                    dragOffsetY = if (draggingProfileId == snapshot.profileId) draggingOffsetY else 0f,
-                    siblingOffsetY = calculateServerStackSiblingOffset(
-                        profileId = snapshot.profileId,
-                        draggingProfileId = draggingProfileId,
-                        draggingTargetIndex = draggingTargetIndex,
-                        dragSession = dragSession,
-                    ),
-                    onDragStart = { onStartDrag(snapshot.profileId) },
-                    onDragDelta = { deltaY -> onDragDelta(snapshot.profileId, deltaY) },
-                    onDragEnd = onDragEnd,
-                    onClick = { onOpenServerDashboard(snapshot.profileId) },
-                )
+                key(snapshot.profileId) {
+                    val isSettlingCard = settlingProfileId == snapshot.profileId
+                    WalletServerStackCard(
+                        snapshot = snapshot,
+                        gestureKey = serverStackGestureKey,
+                        stackedIndex = index,
+                        paletteIndex = paletteIndexByProfileId[snapshot.profileId] ?: index,
+                        cardHeight = HomeServerStackExpandedCardHeight,
+                        collapsedCardHeight = HomeServerStackCollapsedCardHeight,
+                        exposedHeight = HomeServerStackExposedHeight,
+                        selected = index == 0,
+                        stackCount = orderedSnapshots.size,
+                        isDragging = draggingProfileId == snapshot.profileId && !isSettlingCard,
+                        isSettling = isSettlingCard,
+                        dragOffsetY = { if (draggingProfileId == snapshot.profileId && !isSettlingCard) draggingOffsetY() else 0f },
+                        settlingOffsetY = { if (isSettlingCard) settlingOffsetY() else 0f },
+                        siblingOffsetY = calculateServerStackSiblingOffset(
+                            profileId = snapshot.profileId,
+                            draggingProfileId = draggingProfileId,
+                            draggingTargetIndex = draggingTargetIndex,
+                            dragSession = dragSession,
+                        ),
+                        animateSiblingOffset = dragSession != null,
+                        onDragStart = { onStartDrag(snapshot.profileId) },
+                        onDragDelta = { deltaY -> onDragDelta(snapshot.profileId, deltaY) },
+                        onDragEnd = onDragEnd,
+                        onDragCancel = onDragCancel,
+                        onClick = { onOpenServerDashboard(snapshot.profileId) },
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun WalletServerStackCard(
+internal fun WalletServerStackCard(
     snapshot: CachedDashboardServerSnapshot,
+    gestureKey: String,
     stackedIndex: Int,
     paletteIndex: Int,
     cardHeight: Dp,
@@ -2760,11 +2608,15 @@ private fun WalletServerStackCard(
     selected: Boolean,
     stackCount: Int,
     isDragging: Boolean,
-    dragOffsetY: Float,
+    isSettling: Boolean,
+    dragOffsetY: () -> Float,
+    settlingOffsetY: () -> Float,
     siblingOffsetY: Float,
+    animateSiblingOffset: Boolean,
     onDragStart: () -> Unit,
     onDragDelta: (Float) -> Unit,
     onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
     onClick: () -> Unit,
 ) {
     val palette = remember(snapshot.profileId, paletteIndex) {
@@ -2783,7 +2635,6 @@ private fun WalletServerStackCard(
         bottomStart = 0.dp,
         bottomEnd = 0.dp,
     )
-    val cardShape = if (selected || isDragging) cornerShape else collapsedShape
     val uploadLimitText = formatRateLimit(
         value = snapshot.transferInfo.uploadRateLimit,
         unlimitedLabel = stringResource(R.string.limit_unlimited),
@@ -2799,26 +2650,44 @@ private fun WalletServerStackCard(
     val clickSuppressionThresholdPx = with(LocalDensity.current) {
         ServerCardClickSuppressionDragThreshold.toPx()
     }
-    val interactionSource = remember(snapshot.profileId) { MutableInteractionSource() }
-    val pressed by interactionSource.collectIsPressedAsState()
+    val presentation = remember(selected, isDragging, isSettling) {
+        resolveWalletServerStackCardPresentation(
+            selected = selected,
+            isDragging = isDragging,
+            isSettling = isSettling,
+        )
+    }
+    val cardShape = if (presentation.showExpandedLayout) cornerShape else collapsedShape
+    var isPressed by remember(snapshot.profileId) { mutableStateOf(false) }
     var lastDragFinishedAt by remember(snapshot.profileId) { mutableLongStateOf(0L) }
     var dragDistanceSinceStart by remember(snapshot.profileId) { mutableFloatStateOf(0f) }
+    val latestOnDragStart by rememberUpdatedState(onDragStart)
+    val latestOnDragDelta by rememberUpdatedState(onDragDelta)
+    val latestOnDragEnd by rememberUpdatedState(onDragEnd)
+    val latestOnDragCancel by rememberUpdatedState(onDragCancel)
+    val latestOnClick by rememberUpdatedState(onClick)
     val animatedSiblingOffset by animateFloatAsState(
         targetValue = siblingOffsetY,
-        animationSpec = spring(
-            dampingRatio = 0.84f,
-            stiffness = 520f,
-        ),
+        animationSpec = if (animateSiblingOffset) {
+            ReorderSiblingOffsetAnimationSpec
+        } else {
+            snap()
+        },
         label = "walletServerSiblingOffset",
+    )
+    val draggedScale by animateFloatAsState(
+        targetValue = if (isDragging) ReorderDraggedScale else 1f,
+        animationSpec = ReorderScaleAnimationSpec,
+        label = "walletServerDraggedScale",
     )
     val baseTranslationY = if (selected) {
         (stackCount - 1) * exposedStepPx
     } else {
         (stackCount - 1 - stackedIndex) * exposedStepPx
     }
-    val displayHeight = if (selected) cardHeight else collapsedCardHeight
+    val displayHeight = if (presentation.showExpandedLayout) cardHeight else collapsedCardHeight
     val pressedScale by animateFloatAsState(
-        targetValue = if (pressed && !isDragging) 0.985f else 1f,
+        targetValue = if (isPressed && !isDragging) 0.985f else 1f,
         animationSpec = tween(durationMillis = 90),
         label = "walletServerPressedScale",
     )
@@ -2828,73 +2697,98 @@ private fun WalletServerStackCard(
             .fillMaxWidth()
             .height(displayHeight)
             .graphicsLayer {
-                translationY = baseTranslationY + if (isDragging) dragOffsetY else animatedSiblingOffset
+                translationY = baseTranslationY + when {
+                    isDragging -> dragOffsetY()
+                    isSettling -> settlingOffsetY()
+                    else -> animatedSiblingOffset
+                }
                 scaleX = when {
-                    isDragging -> ReorderDraggedScale
-                    selected -> 1f
+                    isDragging -> draggedScale
+                    presentation.showExpandedLayout -> 1f
                     else -> 0.992f
                 } * pressedScale
                 scaleY = when {
-                    isDragging -> ReorderDraggedScale
-                    selected -> 1f
+                    isDragging -> draggedScale
+                    presentation.showExpandedLayout -> 1f
                     else -> 0.992f
                 } * pressedScale
                 shadowElevation = when {
                     isDragging -> ReorderDraggedShadow
+                    isSettling -> ReorderSettlingShadow
                     selected -> ReorderSelectedShadow
                     else -> ReorderCollapsedShadow
                 }
                 shape = cardShape
                 clip = true
             }
-            .pointerInput(snapshot.profileId) {
+            .pointerInput(snapshot.profileId, gestureKey) {
                 if (stackCount < 2) return@pointerInput
                 detectDragGesturesAfterLongPress(
                     onDragStart = {
+                        isPressed = false
                         dragDistanceSinceStart = 0f
-                        onDragStart()
+                        latestOnDragStart()
                     },
                     onDragEnd = {
-                        lastDragFinishedAt = if (dragDistanceSinceStart >= clickSuppressionThresholdPx) {
-                            SystemClock.elapsedRealtime()
-                        } else {
-                            0L
-                        }
-                        onDragEnd()
+                        isPressed = false
+                        lastDragFinishedAt = resolveServerCardClickSuppressionTimestamp(
+                            dragDistanceSinceStart = dragDistanceSinceStart,
+                            clickSuppressionThresholdPx = clickSuppressionThresholdPx,
+                            currentTimeMillis = SystemClock.elapsedRealtime(),
+                        )
+                        latestOnDragEnd()
                     },
                     onDragCancel = {
-                        lastDragFinishedAt = if (dragDistanceSinceStart >= clickSuppressionThresholdPx) {
-                            SystemClock.elapsedRealtime()
-                        } else {
-                            0L
-                        }
-                        onDragEnd()
+                        isPressed = false
+                        lastDragFinishedAt = resolveServerCardClickSuppressionTimestamp(
+                            dragDistanceSinceStart = dragDistanceSinceStart,
+                            clickSuppressionThresholdPx = clickSuppressionThresholdPx,
+                            currentTimeMillis = SystemClock.elapsedRealtime(),
+                        )
+                        latestOnDragCancel()
                     },
                     onDrag = { change, dragAmount ->
                         change.consume()
                         dragDistanceSinceStart += kotlin.math.abs(dragAmount.y)
-                        onDragDelta(dragAmount.y)
+                        latestOnDragDelta(dragAmount.y)
                     },
                 )
             }
-            .zIndex(if (isDragging) (stackCount + 1).toFloat() else (stackCount - stackedIndex).toFloat())
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-            ) {
-                if (SystemClock.elapsedRealtime() - lastDragFinishedAt <= ServerCardClickSuppressionWindowMs) {
-                    return@clickable
-                }
-                onClick()
-            },
+            .pointerInput(snapshot.profileId, gestureKey, lastDragFinishedAt) {
+                detectTapGestures(
+                    onPress = {
+                        isPressed = true
+                        try {
+                            tryAwaitRelease()
+                        } finally {
+                            isPressed = false
+                        }
+                    },
+                    onTap = {
+                        if (
+                            shouldSuppressServerCardClick(
+                                lastDragFinishedAt = lastDragFinishedAt,
+                                currentTimeMillis = SystemClock.elapsedRealtime(),
+                            )
+                        ) {
+                            return@detectTapGestures
+                        }
+                        isPressed = false
+                        latestOnClick()
+                    }
+                )
+            }
+            .zIndex(
+                if (isDragging || isSettling) {
+                    (stackCount + 1).toFloat()
+                } else {
+                    (stackCount - stackedIndex).toFloat()
+                },
+            ),
         shape = cardShape,
         border = BorderStroke(
             1.dp,
-            if (selected) {
-                Color.White.copy(alpha = 0.28f)
-            } else {
-                Color.White.copy(alpha = 0.14f)
-            },
+            Color.White.copy(alpha = presentation.borderAlpha),
         ),
         colors = CardDefaults.outlinedCardColors(
             containerColor = Color.Transparent,
@@ -2908,11 +2802,11 @@ private fun WalletServerStackCard(
                     shape = cardShape,
                 )
                 .padding(
-                    horizontal = if (selected) 16.dp else 15.dp,
-                    vertical = if (selected) 14.dp else 10.dp,
+                    horizontal = presentation.horizontalPadding,
+                    vertical = presentation.verticalPadding,
                 ),
         ) {
-            if (selected) {
+            if (presentation.showExpandedLayout) {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -2963,7 +2857,7 @@ private fun WalletServerStackCard(
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.weight(1f))
+                    
                     WalletCardMetricLine(
                         label = stringResource(R.string.sort_total_uploaded),
                         value = formatBytes(snapshot.transferInfo.uploadedTotal),
@@ -2979,6 +2873,10 @@ private fun WalletServerStackCard(
                     WalletCardMetricLine(
                         label = stringResource(R.string.download_limit_kb_label),
                         value = downloadLimitText,
+                    )
+                    WalletCardMetricLine(
+                        label = stringResource(R.string.free_space_label),
+                        value = formatBytes(snapshot.transferInfo.freeSpaceOnDisk),
                     )
                 }
             } else {
@@ -3054,7 +2952,7 @@ private fun WalletCardMetricLine(
 }
 
 @Composable
-private fun DashboardManagementEmptyCard(
+internal fun DashboardManagementEmptyCard(
     onOpenManager: () -> Unit,
 ) {
     OutlinedCard(
@@ -3089,7 +2987,7 @@ private fun DashboardManagementEmptyCard(
 }
 
 @Composable
-private fun PageRestorePlaceholder() {
+internal fun PageRestorePlaceholder() {
     OutlinedCard(
         modifier = Modifier.fillMaxWidth(),
         border = BorderStroke(1.dp, qbGlassOutlineColor(defaultAlpha = 0.28f)),
@@ -3105,7 +3003,7 @@ private fun PageRestorePlaceholder() {
 }
 
 @Composable
-private fun ServerDashboardSkeleton() {
+internal fun ServerDashboardSkeleton() {
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -3303,18 +3201,6 @@ private fun backendOverviewIconRes(backendType: ServerBackendType): Int {
     }
 }
 
-@Composable
-private fun dashboardChartCardLabel(card: DashboardChartCard): String {
-    return when (card) {
-        DashboardChartCard.COUNTRY_FLOW -> stringResource(R.string.dashboard_country_flow_title)
-        DashboardChartCard.CATEGORY_SHARE -> stringResource(R.string.dashboard_category_share_title)
-        DashboardChartCard.DAILY_UPLOAD -> stringResource(R.string.dashboard_upload_title)
-        DashboardChartCard.TAG_UPLOAD -> stringResource(R.string.dashboard_tag_upload_share_title)
-        DashboardChartCard.TORRENT_STATE -> stringResource(R.string.dashboard_torrent_state_share_title)
-        DashboardChartCard.TRACKER_SITE -> stringResource(R.string.dashboard_tracker_site_share_title)
-    }
-}
-
 private fun formatDashboardSnapshotTime(timestamp: Long): String {
     if (timestamp <= 0L) return "-"
     return runCatching {
@@ -3330,98 +3216,23 @@ private fun ServerOverviewActionButton(
     tint: Color,
     onClick: () -> Unit,
 ) {
-    OutlinedCard(
+    Box(
         modifier = Modifier
-            .width(44.dp)
-            .semantics { contentDescription = description },
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, tint.copy(alpha = 0.32f)),
-        colors = CardDefaults.outlinedCardColors(
-            containerColor = tint.copy(alpha = 0.10f),
-        ),
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            .semantics { contentDescription = description }
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 10.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onClick)
-                .padding(horizontal = 6.dp, vertical = 10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Icon(
-                painter = painterResource(id = iconRes),
-                contentDescription = null,
-                tint = tint,
-                modifier = Modifier.size(18.dp),
-            )
-        }
-    }
-}
-
-private fun defaultServerDashboardPreferences(
-    backendType: ServerBackendType,
-): ServerDashboardPreferences {
-    val visibleCards = when (backendType) {
-        ServerBackendType.QBITTORRENT -> dashboardCardsForBackend(backendType).map { it.storageKey }
-        ServerBackendType.TRANSMISSION -> listOf(
-            DashboardChartCard.CATEGORY_SHARE.storageKey,
-            DashboardChartCard.TAG_UPLOAD.storageKey,
-            DashboardChartCard.TORRENT_STATE.storageKey,
-            DashboardChartCard.TRACKER_SITE.storageKey,
+        Icon(
+            painter = painterResource(id = iconRes),
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(18.dp),
         )
     }
-    return ServerDashboardPreferences(
-        visibleCards = visibleCards,
-        cardOrder = serializeDashboardCardOrder(
-            dashboardCardsForBackend(backendType),
-            dashboardCardsForBackend(backendType),
-        ),
-    )
 }
 
-private fun resolveServerDashboardPreferences(
-    preferences: ServerDashboardPreferences?,
-    backendType: ServerBackendType,
-): ServerDashboardPreferences {
-    val defaults = defaultServerDashboardPreferences(backendType)
-    val availableCards = dashboardCardsForBackend(backendType)
-    val availableStorageKeys = availableCards.map { it.storageKey }.toSet()
-    val rawVisibleCards = preferences?.visibleCards
-        ?.map { it.trim() }
-        ?.filter { it.isNotBlank() }
-        ?.distinct()
-    val filteredVisibleCards = rawVisibleCards
-        ?.filter { token -> token in availableStorageKeys }
-        .orEmpty()
-    val visibleCards = when {
-        preferences == null -> defaults.visibleCards
-        filteredVisibleCards.isNotEmpty() -> {
-            if (
-                backendType == ServerBackendType.TRANSMISSION &&
-                DashboardChartCard.CATEGORY_SHARE.storageKey in availableStorageKeys &&
-                DashboardChartCard.CATEGORY_SHARE.storageKey !in filteredVisibleCards
-            ) {
-                listOf(DashboardChartCard.CATEGORY_SHARE.storageKey) + filteredVisibleCards
-            } else {
-                filteredVisibleCards
-            }
-        }
-        rawVisibleCards.isNullOrEmpty() -> emptyList()
-        else -> defaults.visibleCards
-    }
-    val rawOrder = preferences?.cardOrder?.takeIf { it.isNotBlank() }
-    val parsedOrder = rawOrder?.let { parseDashboardCardOrder(it, availableCards) }.orEmpty()
-    val cardOrder = when {
-        preferences == null -> defaults.cardOrder
-        parsedOrder.isNotEmpty() -> serializeDashboardCardOrder(parsedOrder, availableCards)
-        rawOrder == null -> defaults.cardOrder
-        else -> defaults.cardOrder
-    }
-    return defaults.copy(
-        visibleCards = visibleCards,
-        cardOrder = cardOrder,
-    )
-}
 
 @Composable
 private fun ServerProfileSummaryCard(
@@ -3521,7 +3332,7 @@ private fun ServerProfileSummaryCard(
 }
 
 @Composable
-private fun DashboardEntryHintBubble(
+internal fun DashboardEntryHintBubble(
     text: String,
     dismissDescription: String,
     onDismiss: () -> Unit,
@@ -3806,90 +3617,6 @@ private fun formatRateLimit(value: Long, unlimitedLabel: String): String {
     }
 }
 
-private data class CrossSeedGroupKey(
-    val savePath: String,
-    val size: Long,
-    val uniqueIdentity: String = "",
-)
-
-private fun torrentIdentityKey(torrent: TorrentInfo): String {
-    return torrent.hash.ifBlank {
-        "${torrent.name}|${torrent.addedOn}|${torrent.savePath}|${torrent.size}"
-    }
-}
-
-private fun buildCrossSeedCountMap(torrents: List<TorrentInfo>): Map<String, Int> {
-    val grouped = torrents.groupBy { crossSeedGroupKey(it) }
-    val result = mutableMapOf<String, Int>()
-
-    torrents.forEach { torrent ->
-        val key = crossSeedGroupKey(torrent)
-        val groupCount = grouped[key]?.size ?: 1
-        result[torrentIdentityKey(torrent)] = (groupCount - 1).coerceAtLeast(0)
-    }
-    return result
-}
-
-private fun crossSeedGroupKey(torrent: TorrentInfo): CrossSeedGroupKey {
-    val normalizedPath = torrent.savePath.trim().lowercase()
-    val normalizedSize = torrent.size.coerceAtLeast(0L)
-    if (normalizedPath.isBlank() || normalizedSize <= 0L) {
-        return CrossSeedGroupKey(
-            savePath = "__invalid__",
-            size = -1L,
-            uniqueIdentity = torrent.hash.ifBlank { torrentIdentityKey(torrent) },
-        )
-    }
-    return CrossSeedGroupKey(
-        savePath = normalizedPath,
-        size = normalizedSize,
-    )
-}
-
-private fun sortTorrentList(
-    torrents: List<TorrentInfo>,
-    sortOption: TorrentListSortOption,
-    descending: Boolean,
-    crossSeedCounts: Map<String, Int>,
-): List<TorrentInfo> {
-    val comparator = when (sortOption) {
-        TorrentListSortOption.ADDED_TIME ->
-            compareBy<TorrentInfo> { it.addedOn }
-        TorrentListSortOption.UPLOAD_SPEED ->
-            compareBy<TorrentInfo> { it.uploadSpeed }
-                .thenBy { it.addedOn }
-        TorrentListSortOption.DOWNLOAD_SPEED ->
-            compareBy<TorrentInfo> { it.downloadSpeed }
-                .thenBy { it.addedOn }
-        TorrentListSortOption.SHARE_RATIO ->
-            compareBy<TorrentInfo> { it.ratio }
-                .thenBy { it.addedOn }
-        TorrentListSortOption.TOTAL_UPLOADED ->
-            compareBy<TorrentInfo> { it.uploaded }
-                .thenBy { it.addedOn }
-        TorrentListSortOption.TOTAL_DOWNLOADED ->
-            compareBy<TorrentInfo> { it.downloaded }
-                .thenBy { it.addedOn }
-        TorrentListSortOption.TORRENT_SIZE ->
-            compareBy<TorrentInfo> { it.size }
-                .thenBy { it.addedOn }
-        TorrentListSortOption.ACTIVITY_TIME ->
-            compareBy<TorrentInfo> { it.lastActivity }
-                .thenBy { it.addedOn }
-        TorrentListSortOption.SEEDERS ->
-            compareBy<TorrentInfo> { it.seeders }
-                .thenBy { it.addedOn }
-        TorrentListSortOption.LEECHERS ->
-            compareBy<TorrentInfo> { it.leechers }
-                .thenBy { it.addedOn }
-        TorrentListSortOption.CROSS_SEED_COUNT ->
-            compareBy<TorrentInfo> { crossSeedCounts[torrentIdentityKey(it)] ?: 0 }
-                .thenBy { it.addedOn }
-    }
-    val finalComparator = if (descending) comparator.reversed() else comparator
-    return torrents.sortedWith(finalComparator)
-}
-
 @Composable
 private fun torrentListSortLabel(option: TorrentListSortOption): String {
     return when (option) {
@@ -3911,95 +3638,6 @@ private fun trackerSiteName(tracker: String, unknownLabel: String): String {
     return formatTrackerSiteName(tracker, unknownLabel)
 }
 
-private fun dashboardCardsForBackend(backendType: ServerBackendType): List<DashboardChartCard> {
-    return when (backendType) {
-        ServerBackendType.QBITTORRENT -> listOf(
-            DashboardChartCard.COUNTRY_FLOW,
-            DashboardChartCard.CATEGORY_SHARE,
-            DashboardChartCard.DAILY_UPLOAD,
-        )
-
-        ServerBackendType.TRANSMISSION -> listOf(
-            DashboardChartCard.CATEGORY_SHARE,
-            DashboardChartCard.TAG_UPLOAD,
-            DashboardChartCard.TORRENT_STATE,
-            DashboardChartCard.TRACKER_SITE,
-        )
-    }
-}
-
-private fun parseDashboardCardOrder(
-    raw: String,
-    availableCards: List<DashboardChartCard>,
-): List<DashboardChartCard> {
-    val availableByKey = availableCards.associateBy { it.storageKey }
-    val parsed = raw
-        .split(',')
-        .mapNotNull { token ->
-            availableByKey[token.trim()]
-        }
-        .distinct()
-        .toMutableList()
-    availableCards.forEach { card ->
-        if (!parsed.contains(card)) {
-            parsed += card
-        }
-    }
-    return parsed
-}
-
-private fun serializeDashboardCardOrder(
-    order: List<DashboardChartCard>,
-    availableCards: List<DashboardChartCard>,
-): String {
-    return parseDashboardCardOrder(
-        order.joinToString(",") { it.storageKey },
-        availableCards,
-    )
-        .joinToString(",") { it.storageKey }
-}
-
-private fun swapDashboardCardOrder(
-    order: List<DashboardChartCard>,
-    first: DashboardChartCard,
-    second: DashboardChartCard,
-): List<DashboardChartCard> {
-    val mutable = order.toMutableList()
-    val firstIndex = mutable.indexOf(first)
-    val secondIndex = mutable.indexOf(second)
-    if (firstIndex < 0 || secondIndex < 0) return order
-    mutable[firstIndex] = second
-    mutable[secondIndex] = first
-    return mutable
-}
-
-private fun reorderDashboardCardOrder(
-    order: List<DashboardChartCard>,
-    visibleCards: List<DashboardChartCard>,
-    card: DashboardChartCard,
-    targetIndex: Int,
-): List<DashboardChartCard> {
-    val currentVisibleIndex = visibleCards.indexOf(card)
-    if (currentVisibleIndex < 0 || targetIndex !in visibleCards.indices || currentVisibleIndex == targetIndex) {
-        return order
-    }
-
-    val reorderedVisibleCards = visibleCards.toMutableList().apply {
-        remove(card)
-        add(targetIndex, card)
-    }
-    val visibleCardSet = visibleCards.toSet()
-    var visibleCursor = 0
-
-    return order.map { existingCard ->
-        if (existingCard in visibleCardSet) {
-            reorderedVisibleCards[visibleCursor++]
-        } else {
-            existingCard
-        }
-    }
-}
-
 private fun reorderServerProfileIds(
     current: List<String>,
     profileId: String,
@@ -4015,109 +3653,14 @@ private fun reorderServerProfileIds(
     }
 }
 
-private fun <T> buildVerticalReorderSession(
-    items: List<T>,
-    startIndex: Int,
-    slotTops: List<Float>,
-    slotHeights: List<Float>,
-    edgeSlackPx: Float,
-): VerticalReorderSession<T> {
-    require(items.size == slotTops.size && items.size == slotHeights.size)
-    val slotCenters = slotTops.indices.map { index ->
-        slotTops[index] + (slotHeights[index] / 2f)
-    }
-    val startCenter = slotCenters[startIndex]
-    val minOffset = (slotCenters.minOrNull() ?: startCenter) - startCenter - edgeSlackPx
-    val maxOffset = (slotCenters.maxOrNull() ?: startCenter) - startCenter + edgeSlackPx
-    return VerticalReorderSession(
-        items = items,
-        indexByItem = items.mapIndexed { index, item -> item to index }.toMap(),
-        startIndex = startIndex,
-        slotTops = slotTops,
-        slotCenters = slotCenters,
-        minOffset = minOffset,
-        maxOffset = maxOffset,
-    )
-}
 
-private fun <T> resolveVerticalReorderTargetIndex(
-    session: VerticalReorderSession<T>,
-    dragOffsetY: Float,
-): Int {
-    val currentCenter = session.slotCenters[session.startIndex] + dragOffsetY
-    var bestIndex = session.startIndex
-    var bestDistance = Float.MAX_VALUE
-    session.slotCenters.forEachIndexed { index, center ->
-        val distance = kotlin.math.abs(center - currentCenter)
-        if (distance < bestDistance) {
-            bestDistance = distance
-            bestIndex = index
-        }
-    }
-    return bestIndex
-}
 
-private fun <T> calculateVerticalReorderSiblingOffset(
-    item: T,
-    draggingItem: T?,
-    draggingTargetIndex: Int,
-    dragSession: VerticalReorderSession<T>?,
-): Float {
-    if (draggingItem == null || draggingItem == item || dragSession == null) return 0f
-    if (draggingTargetIndex !in dragSession.items.indices) return 0f
-    val originalIndex = dragSession.indexByItem[item] ?: return 0f
-    if (dragSession.startIndex == draggingTargetIndex) return 0f
-    val reorderedItems = moveItemInList(
-        items = dragSession.items,
-        fromIndex = dragSession.startIndex,
-        toIndex = draggingTargetIndex,
-    )
-    val targetSlotIndex = reorderedItems.indexOf(item)
-    if (targetSlotIndex < 0) return 0f
-    return dragSession.slotTops[targetSlotIndex] - dragSession.slotTops[originalIndex]
-}
 
-private fun <T> moveItemInList(
-    items: List<T>,
-    fromIndex: Int,
-    toIndex: Int,
-): List<T> {
-    if (fromIndex !in items.indices || toIndex !in items.indices || fromIndex == toIndex) {
-        return items
-    }
-    return items.toMutableList().apply {
-        val item = removeAt(fromIndex)
-        add(toIndex, item)
-    }
-}
 
-private fun calculateServerStackSiblingOffset(
-    profileId: String,
-    draggingProfileId: String?,
-    draggingTargetIndex: Int,
-    dragSession: VerticalReorderSession<String>?,
-): Float {
-    return calculateVerticalReorderSiblingOffset(
-        item = profileId,
-        draggingItem = draggingProfileId,
-        draggingTargetIndex = draggingTargetIndex,
-        dragSession = dragSession,
-    )
-}
 
-private fun calculateDashboardSiblingOffset(
-    card: DashboardChartCard,
-    draggingCard: DashboardChartCard?,
-    draggingTargetIndex: Int,
-    dragSession: VerticalReorderSession<DashboardChartCard>?,
-): Float {
-    return calculateVerticalReorderSiblingOffset(
-        item = card,
-        draggingItem = draggingCard,
-        draggingTargetIndex = draggingTargetIndex,
-        dragSession = dragSession,
-    )
-}
+
+
+
 
 
 

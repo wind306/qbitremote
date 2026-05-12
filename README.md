@@ -16,46 +16,34 @@
 
 ### 核心功能
 
-- 同时支持 qBittorrent WebUI API 与 Transmission RPC
+- 同时支持 qBittorrent WebUI API（5.x 兼容）与 Transmission RPC
 - 多服务器配置保存、快速切换与独立缓存快照
 - 首页全服务器实时上下行速度曲线与服务器卡片总览
-- 服务器仪表盘图表，包括国家、分类、标签、站点和状态分布
+- 服务器仪表盘图表，包括国家、分类、标签、站点（饼状图）和状态分布
+- 种子列表按状态、分类、标签三行独立过滤
 - 种子列表搜索、排序、跨页返回定位与快速回顶
-- 种子详情页支持信息、服务器、用户、文件四个页签
+- 种子详情页支持信息、Tracker、用户、文件四个页签
 - Tracker 复制、编辑、删除，以及 passkey 隐藏/显示
 - 重新汇报、重新校验、分类/标签修改、限速、分享率等常用操作
 - 文件树浏览、文件夹优先展示与更稳定的前后台恢复体验
+- 从浏览器或其他 App 分享磁力链接直接添加到客户端
+- 种子下载完成通知栏提醒（含震动）
+- 桌面 Widget：实时显示全局上下行速度与种子总数
 - 中英文、本地主题、Google Play 资源与自适应图标
 
 ### 当前版本
 
 - App 名称：`TorrentRemote`
 - Application ID：`com.hjw.qbremote`
-- 版本：`0.1.11`
-- Version Code：`12`
+- 版本：`0.1.15`
+- Version Code：`16`
 - Min SDK：`26`
 - Target / Compile SDK：`35`
 
 ### 支持的后端
 
-- qBittorrent WebUI API
+- qBittorrent WebUI API（4.x / 5.x）
 - Transmission RPC
-
-### 截图预览
-
-<p align="center">
-  <img src="pic/Screenshot_20260322_124142_TorrentRemote.png" alt="首页总览" width="230" />
-  <img src="pic/Screenshot_20260322_125316_TorrentRemote.png" alt="qBittorrent 服务器仪表盘" width="230" />
-  <img src="pic/Screenshot_20260322_125338_TorrentRemote.png" alt="Transmission 服务器仪表盘" width="230" />
-</p>
-<p align="center">
-  <img src="pic/Screenshot_20260322_125324_TorrentRemote.png" alt="种子列表与排序" width="230" />
-  <img src="pic/Screenshot_20260322_125359_TorrentRemote.png" alt="图表详情页" width="230" />
-  <img src="pic/Screenshot_20260322_125420_TorrentRemote.png" alt="种子信息页" width="230" />
-</p>
-<p align="center">
-  <img src="pic/Screenshot_20260322_125425_TorrentRemote.png" alt="Tracker 管理页" width="230" />
-</p>
 
 ### 构建与发布
 
@@ -106,46 +94,34 @@ Debug 构建：
 
 ### Highlights
 
-- Supports both qBittorrent WebUI API and Transmission RPC
+- Supports both qBittorrent WebUI API (4.x / 5.x compatible) and Transmission RPC
 - Multi-server profiles with fast switching and isolated cached snapshots
 - Home dashboard with realtime upload/download speed curves and stacked server cards
-- Server dashboard charts for country, category, tag, tracker-site, and state distribution
+- Server dashboard charts for country, category, tag, tracker-site (pie chart), and state distribution
+- Torrent list filtering by state, category, and tag in three independent rows
 - Torrent list search, sorting, return-to-item positioning, and quick jump-to-top
-- Torrent detail tabs for Info, Server, Peers, and Files
+- Torrent detail tabs for Info, Trackers, Peers, and Files
 - Tracker copy, edit, delete, and passkey show/hide controls
 - Reannounce, recheck, category/tag updates, speed limits, ratio, and other common actions
 - File tree browsing with folder-first navigation and improved foreground/background restore
+- Share magnet links from browser or other apps directly to the client
+- Download completion notification with vibration
+- Home screen widget showing realtime global upload/download speed and torrent count
 - Chinese and English localization, custom themes, Google Play assets, and adaptive launcher icons
 
 ### Current Release
 
 - App name: `TorrentRemote`
 - Application ID: `com.hjw.qbremote`
-- Version: `0.1.11`
-- Version code: `12`
+- Version: `0.1.15`
+- Version code: `16`
 - Min SDK: `26`
 - Target / Compile SDK: `35`
 
 ### Supported Backends
 
-- qBittorrent WebUI API
+- qBittorrent WebUI API (4.x / 5.x)
 - Transmission RPC
-
-### Screenshots
-
-<p align="center">
-  <img src="pic/Screenshot_20260322_124142_TorrentRemote.png" alt="Home dashboard" width="230" />
-  <img src="pic/Screenshot_20260322_125316_TorrentRemote.png" alt="qBittorrent server dashboard" width="230" />
-  <img src="pic/Screenshot_20260322_125338_TorrentRemote.png" alt="Transmission server dashboard" width="230" />
-</p>
-<p align="center">
-  <img src="pic/Screenshot_20260322_125324_TorrentRemote.png" alt="Torrent list and sorting" width="230" />
-  <img src="pic/Screenshot_20260322_125359_TorrentRemote.png" alt="Chart detail page" width="230" />
-  <img src="pic/Screenshot_20260322_125420_TorrentRemote.png" alt="Torrent info tab" width="230" />
-</p>
-<p align="center">
-  <img src="pic/Screenshot_20260322_125425_TorrentRemote.png" alt="Tracker management tab" width="230" />
-</p>
 
 ### Build and Release
 

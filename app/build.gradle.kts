@@ -1,9 +1,10 @@
-import org.gradle.api.GradleException
+﻿import org.gradle.api.GradleException
 import java.util.Properties
 
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("androidx.baselineprofile")
 }
 
 val keystoreProperties = Properties().apply {
@@ -37,8 +38,9 @@ android {
         applicationId = "com.hjw.qbremote"
         minSdk = 26
         targetSdk = 35
-        versionCode = 12
-        versionName = "0.1.11"
+        versionCode = 16
+        versionName = "0.1.15"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
@@ -58,8 +60,6 @@ android {
             isShrinkResources = false
         }
         release {
-            // Keep release builds behaviorally aligned with the verified debug builds.
-            // The current app still has release-only runtime regressions under R8/resource shrinking.
             isMinifyEnabled = false
             isShrinkResources = false
             if (hasReleaseSigningConfig) {
@@ -133,15 +133,22 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material:material")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("androidx.security:security-crypto:1.1.0")
     implementation("com.google.errorprone:error_prone_annotations:2.28.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("com.squareup.retrofit2:converter-gson:2.11.0")
     implementation("com.squareup.retrofit2:converter-scalars:2.11.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
+    baselineProfile(project(":benchmark"))
 }
+

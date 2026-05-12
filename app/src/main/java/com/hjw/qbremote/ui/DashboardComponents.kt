@@ -1,17 +1,16 @@
-package com.hjw.qbremote.ui
+﻿package com.hjw.qbremote.ui
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,24 +21,20 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -52,142 +47,49 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
 import com.hjw.qbremote.R
-import com.hjw.qbremote.data.HomeAggregateSpeedHistorySnapshot
-import com.hjw.qbremote.data.HomeSpeedHistoryPoint
 import com.hjw.qbremote.data.model.CountryUploadRecord
-import com.hjw.qbremote.data.model.TorrentInfo
+import com.hjw.qbremote.data.model.TransferInfo
 import com.hjw.qbremote.ui.theme.qbGlassCardColors
 import com.hjw.qbremote.ui.theme.qbGlassEmptyStateColor
 import com.hjw.qbremote.ui.theme.qbGlassHoleColor
 import com.hjw.qbremote.ui.theme.qbGlassOutlineColor
-import java.time.Instant
-import java.time.ZoneId
-import java.util.Locale
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 
 @Composable
-fun CategorySharePieCard(
-    torrents: List<TorrentInfo>,
-    coverageNote: String = "",
-    showHideButton: Boolean,
-    onRevealHide: () -> Unit,
-    onHide: () -> Unit,
-) {
-    val noCategoryLabel = stringResource(R.string.no_category)
-    val otherLabel = stringResource(R.string.chart_other_label)
-    val entries = remember(torrents, noCategoryLabel, otherLabel) {
-        collapsePieEntries(
-            entries = buildCategoryShareEntries(
-                torrents = torrents,
-                noCategoryLabel = noCategoryLabel,
-            ),
-            maxEntries = 7,
-            otherLabel = otherLabel,
-        )
-    }.map { (label, count) ->
-        val torrentCount = count.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-        PieLegendEntry(
-            label = label,
-            value = count,
-            valueText = pluralStringResource(
-                R.plurals.chart_category_count,
-                torrentCount,
-                torrentCount,
-            ),
-        )
-    }
-
-    OutlinedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = PanelShape,
-        border = BorderStroke(1.dp, qbGlassOutlineColor()),
-        colors = qbGlassCardColors(),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 13.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            DashboardCardHeader(
-                title = stringResource(R.string.dashboard_category_share_title),
-                showHideButton = showHideButton,
-                onRevealHide = onRevealHide,
-                onHide = onHide,
-            )
-
-            if (entries.isEmpty()) {
-                DashboardChartEmptyState(
-                    text = stringResource(R.string.chart_no_data),
-                )
-                return@Column
-            }
-
-            val total = entries.sumOf { it.value }.coerceAtLeast(1L)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                DashboardPieChart(
-                    entries = entries,
-                    total = total,
-                    holeColor = qbGlassHoleColor(),
-                    modifier = Modifier.size(132.dp),
-                )
-
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    horizontalAlignment = Alignment.End,
-                ) {
-                    entries.forEachIndexed { index, entry ->
-                        val color = DashboardPiePalette[index % DashboardPiePalette.size]
-                        val share = (entry.value.toFloat() / total.toFloat()).coerceIn(0f, 1f)
-                        CategoryLegendRow(
-                            color = color,
-                            label = entry.label,
-                            shareText = formatPercent(share),
-                            valueText = entry.valueText,
-                        )
-                    }
-                }
-            }
-            if (coverageNote.isNotBlank()) {
-                Text(
-                    text = coverageNote,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun CountryFlowMapCard(
+internal fun CountryFlowMapCard(
     stats: List<CountryUploadRecord>,
-    coverageNote: String = "",
     showHideButton: Boolean,
     onRevealHide: () -> Unit,
     onHide: () -> Unit,
 ) {
-    val locale = LocalContext.current.resources.configuration.locales[0] ?: Locale.getDefault()
     val displayStats = remember(stats) { mergeCountryUploadRecordsForDisplay(stats) }
-    val topCountries = remember(displayStats) { displayStats.take(3) }
     val emptyText = stringResource(R.string.dashboard_country_flow_empty)
+    val topSummaryEntries = remember(displayStats) {
+        trimDashboardBarEntries(
+            entries = displayStats.map { record ->
+                DashboardBarSeedEntry(
+                    label = LegendLabelSpec.Raw(record.countryName.ifBlank { record.countryCode }),
+                    value = record.uploadedBytes,
+                    valueKind = LegendValueKind.BYTES,
+                )
+            },
+            maxEntries = 3,
+        )
+    }
+    val resolvedTopEntries = resolveDashboardBarEntries(topSummaryEntries)
+    val compactSummaryItems = remember(resolvedTopEntries) {
+        buildCompactCountrySummaryItems(resolvedTopEntries)
+    }
 
     OutlinedCard(
         modifier = Modifier.fillMaxWidth(),
@@ -223,151 +125,47 @@ fun CountryFlowMapCard(
                 )
             }
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (topCountries.isEmpty()) {
-                    DashboardInlineEmptyState(text = emptyText)
-                } else {
-                    topCountries.forEachIndexed { index, entry ->
-                        if (index > 0) {
-                            Spacer(modifier = Modifier.width(14.dp))
-                        }
-                        Text(
-                            text = buildString {
-                                append(
-                                    compactCountryLabelForDisplay(
-                                        countryCode = entry.countryCode,
-                                        fallbackName = entry.countryName,
-                                        locale = locale,
-                                    )
-                                )
-                                append(formatUploadAmountInMbOrGb(entry.uploadedBytes))
-                            },
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                        )
-                    }
-                }
-            }
-
-            Text(
-                text = stringResource(R.string.dashboard_country_flow_note),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (coverageNote.isNotBlank()) {
-                Text(
-                    text = coverageNote,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun DailyTagUploadPieCard(
-    date: String,
-    stats: List<DailyTagUploadStat>,
-    titleOverride: String? = null,
-    showHideButton: Boolean,
-    onRevealHide: () -> Unit,
-    onHide: () -> Unit,
-) {
-    val noTagLabel = stringResource(R.string.no_tags)
-    val otherLabel = stringResource(R.string.chart_other_label)
-    val rawEntries = remember(stats, noTagLabel) {
-        stats
-            .filter { it.uploadedBytes > 0L }
-            .map { stat ->
-                val tagLabel = if (stat.isNoTag) noTagLabel else stat.tag
-                tagLabel to stat.uploadedBytes
-            }
-    }
-    val collapsed = remember(rawEntries, otherLabel) {
-        collapsePieEntries(
-            entries = rawEntries,
-            maxEntries = 7,
-            otherLabel = otherLabel,
-        )
-    }
-    val entries = collapsed.map { (label, uploadedBytes) ->
-        PieLegendEntry(
-            label = label,
-            value = uploadedBytes,
-            valueText = formatBytes(uploadedBytes),
-        )
-    }
-    val totalUploaded = entries.sumOf { it.value }
-
-    OutlinedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = PanelShape,
-        border = BorderStroke(1.dp, qbGlassOutlineColor()),
-        colors = qbGlassCardColors(),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 13.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            DashboardCardHeader(
-                title = titleOverride ?: if (date.isNotBlank()) {
-                    stringResource(R.string.dashboard_upload_title_with_date, date)
-                } else {
-                    stringResource(R.string.dashboard_upload_title)
-                },
-                showHideButton = showHideButton,
-                onRevealHide = onRevealHide,
-                onHide = onHide,
-            )
-
-            if (entries.isEmpty()) {
-                DashboardInlineEmptyState(
-                    text = stringResource(R.string.dashboard_daily_tag_upload_empty),
-                )
-                return@Column
-            }
-
-            val total = totalUploaded.coerceAtLeast(1L)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                DashboardPieChart(
-                    entries = entries,
-                    total = total,
-                    holeColor = qbGlassHoleColor(),
-                    modifier = Modifier.size(132.dp),
-                )
-
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    horizontalAlignment = Alignment.End,
+            if (resolvedTopEntries.isEmpty()) {
+                DashboardInlineEmptyState(text = emptyText)
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    entries.forEachIndexed { index, entry ->
-                        val color = DashboardPiePalette[index % DashboardPiePalette.size]
-                        val share = (entry.value.toFloat() / total.toFloat()).coerceIn(0f, 1f)
-                        DailyUploadLegendRow(
-                            color = color,
-                            label = entry.label,
-                            shareText = formatPercent(share),
-                            valueText = entry.valueText,
-                        )
+                    compactSummaryItems.forEach { item ->
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = item.labelText,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (item.valueText.isNotBlank()) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = item.valueText,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontWeight = FontWeight.SemiBold,
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
                     }
                 }
             }
+
         }
     }
 }
@@ -377,26 +175,64 @@ fun InlineRealtimeSpeedChart(
     aggregate: DashboardAggregateState,
     modifier: Modifier = Modifier,
 ) {
-    val axisValues = remember(aggregate.realtimeSpeedSeries, aggregate.transferInfo) {
-        buildRealtimeAxisValues(
-            values = buildList {
-                add(aggregate.transferInfo.uploadSpeed.coerceAtLeast(0L))
-                add(aggregate.transferInfo.downloadSpeed.coerceAtLeast(0L))
-                aggregate.realtimeSpeedSeries.forEach { point ->
-                    add(point.uploadSpeed.coerceAtLeast(0L))
-                    add(point.downloadSpeed.coerceAtLeast(0L))
-                }
-            },
+    val chartTransferInfo = aggregate.chartTransferInfo ?: aggregate.transferInfo
+    val resolvedPoints = remember(aggregate.realtimeSpeedSeries, chartTransferInfo) {
+        resolveRealtimeChartPoints(
+            series = aggregate.realtimeSpeedSeries,
+            transferInfo = chartTransferInfo,
         )
     }
-    if (aggregate.realtimeSpeedSeries.size < 2) return
+    val axisValues = remember(resolvedPoints, chartTransferInfo) {
+        buildRealtimeAxisValues(
+            values = buildRealtimeAxisInputValues(
+                points = resolvedPoints,
+                transferInfo = chartTransferInfo,
+            ),
+        )
+    }
     RealtimeSpeedChart(
         modifier = modifier,
-        points = aggregate.realtimeSpeedSeries,
+        points = resolvedPoints,
         axisValues = axisValues,
         uploadColor = Color(0xFFFF4B8B),
         downloadColor = Color(0xFF5E7CFF),
     )
+}
+
+internal fun resolveRealtimeChartPoints(
+    series: List<RealtimeSpeedPoint>,
+    transferInfo: TransferInfo,
+): List<RealtimeSpeedPoint> {
+    val sanitizedSeries = series.map { point ->
+        point.copy(
+            uploadSpeed = point.uploadSpeed.coerceAtLeast(0L),
+            downloadSpeed = point.downloadSpeed.coerceAtLeast(0L),
+        )
+    }
+    val transferPoint = RealtimeSpeedPoint(
+        timestamp = sanitizedSeries.lastOrNull()?.timestamp?.let { timestamp ->
+            if (timestamp == Long.MAX_VALUE) timestamp else timestamp + 1L
+        } ?: 0L,
+        uploadSpeed = transferInfo.uploadSpeed.coerceAtLeast(0L),
+        downloadSpeed = transferInfo.downloadSpeed.coerceAtLeast(0L),
+        onlineServerCount = sanitizedSeries.lastOrNull()?.onlineServerCount ?: 0,
+    )
+
+    val merged = when {
+        sanitizedSeries.isEmpty() -> listOf(transferPoint)
+        sanitizedSeries.last().uploadSpeed == transferPoint.uploadSpeed &&
+            sanitizedSeries.last().downloadSpeed == transferPoint.downloadSpeed -> sanitizedSeries
+        else -> sanitizedSeries + transferPoint
+    }
+    if (merged.size >= 2) return merged
+
+    val stablePoint = merged.firstOrNull() ?: transferPoint
+    val nextTimestamp = if (stablePoint.timestamp == Long.MAX_VALUE) {
+        Long.MAX_VALUE
+    } else {
+        stablePoint.timestamp + 1L
+    }
+    return listOf(stablePoint, stablePoint.copy(timestamp = nextTimestamp))
 }
 
 @Composable
@@ -530,6 +366,20 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawRealtimeSeriesL
     )
 }
 
+internal fun buildRealtimeAxisInputValues(
+    points: List<RealtimeSpeedPoint>,
+    transferInfo: TransferInfo,
+): List<Long> {
+    return buildList(capacity = points.size * 2 + 2) {
+        add(transferInfo.uploadSpeed.coerceAtLeast(0L))
+        add(transferInfo.downloadSpeed.coerceAtLeast(0L))
+        points.forEach { point ->
+            add(point.uploadSpeed.coerceAtLeast(0L))
+            add(point.downloadSpeed.coerceAtLeast(0L))
+        }
+    }
+}
+
 private fun buildRealtimeAxisValues(values: List<Long>): List<Long> {
     val axisMax = roundRealtimeAxisMax(values.maxOrNull()?.coerceAtLeast(1L) ?: 1L)
     return listOf(
@@ -541,7 +391,7 @@ private fun buildRealtimeAxisValues(values: List<Long>): List<Long> {
 }
 
 private fun roundRealtimeAxisMax(value: Long): Long {
-    if (value <= 1L) return 1L
+    if (value <= 3L) return 3L
     var magnitude = 1L
     while (magnitude <= Long.MAX_VALUE / 10L && magnitude * 10L < value) {
         magnitude *= 10L
@@ -556,349 +406,9 @@ private fun roundRealtimeAxisMax(value: Long): Long {
     return rounded * magnitude
 }
 
-@Composable
-fun TransmissionLabelCategoryPieCard(
-    torrents: List<TorrentInfo>,
-    showHideButton: Boolean,
-    onRevealHide: () -> Unit,
-    onHide: () -> Unit,
-) {
-    val noTagLabel = stringResource(R.string.no_tags)
-    val otherLabel = stringResource(R.string.chart_other_label)
-    val entries = remember(torrents, noTagLabel, otherLabel) {
-        collapsePieEntries(
-            entries = buildTransmissionLabelShareEntries(
-                torrents = torrents,
-                noTagLabel = noTagLabel,
-            ),
-            maxEntries = 7,
-            otherLabel = otherLabel,
-        )
-    }.map { (label, count) ->
-        val torrentCount = count.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-        PieLegendEntry(
-            label = label,
-            value = count,
-            valueText = pluralStringResource(
-                R.plurals.chart_category_count,
-                torrentCount,
-                torrentCount,
-            ),
-        )
-    }
-
-    OutlinedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = PanelShape,
-        border = BorderStroke(1.dp, qbGlassOutlineColor()),
-        colors = qbGlassCardColors(),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 13.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            DashboardCardHeader(
-                title = stringResource(R.string.dashboard_category_share_title),
-                showHideButton = showHideButton,
-                onRevealHide = onRevealHide,
-                onHide = onHide,
-            )
-
-            if (entries.isEmpty()) {
-                DashboardChartEmptyState(
-                    text = stringResource(R.string.chart_no_data),
-                )
-                return@Column
-            }
-
-            val total = entries.sumOf { it.value }.coerceAtLeast(1L)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                DashboardPieChart(
-                    entries = entries,
-                    total = total,
-                    holeColor = qbGlassHoleColor(),
-                    modifier = Modifier.size(142.dp),
-                )
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(7.dp),
-                ) {
-                    entries.forEachIndexed { index, entry ->
-                        val color = DashboardPiePalette[index % DashboardPiePalette.size]
-                        val share = entry.value.toFloat() / total.toFloat()
-                        CategoryLegendRow(
-                            color = color,
-                            label = entry.label,
-                            shareText = formatPercent(share),
-                            valueText = entry.valueText,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-private enum class TransmissionStateGroup {
-    UPLOADING,
-    DOWNLOADING,
-    PAUSED,
-    QUEUED,
-    CHECKING,
-    COMPLETED,
-    ERROR,
-    UNKNOWN,
-}
-
-@Composable
-fun TransmissionStatePieCard(
-    torrents: List<TorrentInfo>,
-    showHideButton: Boolean,
-    onRevealHide: () -> Unit,
-    onHide: () -> Unit,
-) {
-    val uploadingLabel = stringResource(R.string.status_uploading)
-    val downloadingLabel = stringResource(R.string.status_downloading)
-    val pausedLabel = stringResource(R.string.status_paused)
-    val queuedLabel = stringResource(R.string.state_queued)
-    val checkingLabel = stringResource(R.string.status_checking)
-    val completedLabel = stringResource(R.string.status_completed)
-    val errorLabel = stringResource(R.string.status_error)
-    val unknownLabel = stringResource(R.string.state_unknown)
-    val otherLabel = stringResource(R.string.chart_other_label)
-    val rawEntries = remember(
-        torrents,
-        uploadingLabel,
-        downloadingLabel,
-        pausedLabel,
-        queuedLabel,
-        checkingLabel,
-        completedLabel,
-        errorLabel,
-        unknownLabel,
-    ) {
-        val grouped = torrents.groupingBy(::transmissionStateGroupOf).eachCount()
-        listOf(
-            uploadingLabel to grouped[TransmissionStateGroup.UPLOADING],
-            downloadingLabel to grouped[TransmissionStateGroup.DOWNLOADING],
-            pausedLabel to grouped[TransmissionStateGroup.PAUSED],
-            queuedLabel to grouped[TransmissionStateGroup.QUEUED],
-            checkingLabel to grouped[TransmissionStateGroup.CHECKING],
-            completedLabel to grouped[TransmissionStateGroup.COMPLETED],
-            errorLabel to grouped[TransmissionStateGroup.ERROR],
-            unknownLabel to grouped[TransmissionStateGroup.UNKNOWN],
-        ).mapNotNull { (label, count) ->
-            count?.takeIf { it > 0 }?.let { label to it.toLong() }
-        }
-    }
-    val collapsed = remember(rawEntries, otherLabel) {
-        collapsePieEntries(
-            entries = rawEntries,
-            maxEntries = 7,
-            otherLabel = otherLabel,
-        )
-    }
-    val entries = collapsed.map { (label, count) ->
-        val torrentCount = count.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-        PieLegendEntry(
-            label = label,
-            value = count,
-            valueText = pluralStringResource(
-                R.plurals.chart_category_count,
-                torrentCount,
-                torrentCount,
-            ),
-        )
-    }
-
-    OutlinedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = PanelShape,
-        border = BorderStroke(1.dp, qbGlassOutlineColor()),
-        colors = qbGlassCardColors(),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 13.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            DashboardCardHeader(
-                title = stringResource(R.string.dashboard_torrent_state_share_title),
-                showHideButton = showHideButton,
-                onRevealHide = onRevealHide,
-                onHide = onHide,
-            )
-
-            if (entries.isEmpty()) {
-                DashboardInlineEmptyState(text = stringResource(R.string.chart_no_data))
-                return@Column
-            }
-
-            val total = entries.sumOf { it.value }.coerceAtLeast(1L)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                DashboardPieChart(
-                    entries = entries,
-                    total = total,
-                    holeColor = qbGlassHoleColor(),
-                    modifier = Modifier.size(132.dp),
-                )
-
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    horizontalAlignment = Alignment.End,
-                ) {
-                    entries.forEachIndexed { index, entry ->
-                        val color = DashboardPiePalette[index % DashboardPiePalette.size]
-                        val share = (entry.value.toFloat() / total.toFloat()).coerceIn(0f, 1f)
-                        DailyUploadLegendRow(
-                            color = color,
-                            label = entry.label,
-                            shareText = formatPercent(share),
-                            valueText = entry.valueText,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun TransmissionTrackerSitePieCard(
-    torrents: List<TorrentInfo>,
-    showHideButton: Boolean,
-    onRevealHide: () -> Unit,
-    onHide: () -> Unit,
-) {
-    val unknownSiteLabel = stringResource(R.string.dashboard_tracker_site_unknown)
-    val otherLabel = stringResource(R.string.chart_other_label)
-    val rawEntries = remember(torrents, unknownSiteLabel) {
-        torrents
-            .groupingBy { torrent -> transmissionTrackerSiteLabel(torrent.tracker, unknownSiteLabel) }
-            .eachCount()
-            .mapNotNull { (site, count) ->
-                count.takeIf { it > 0 }?.let { site to it.toLong() }
-            }
-    }
-    val collapsed = remember(rawEntries, otherLabel) {
-        collapsePieEntries(
-            entries = rawEntries,
-            maxEntries = 7,
-            otherLabel = otherLabel,
-        )
-    }
-    val entries = collapsed.map { (label, count) ->
-        val torrentCount = count.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-        PieLegendEntry(
-            label = label,
-            value = count,
-            valueText = pluralStringResource(
-                R.plurals.chart_category_count,
-                torrentCount,
-                torrentCount,
-            ),
-        )
-    }
-
-    OutlinedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = PanelShape,
-        border = BorderStroke(1.dp, qbGlassOutlineColor()),
-        colors = qbGlassCardColors(),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 13.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            DashboardCardHeader(
-                title = stringResource(R.string.dashboard_tracker_site_share_title),
-                showHideButton = showHideButton,
-                onRevealHide = onRevealHide,
-                onHide = onHide,
-            )
-
-            if (entries.isEmpty()) {
-                DashboardInlineEmptyState(text = stringResource(R.string.chart_no_data))
-                return@Column
-            }
-
-            val total = entries.sumOf { it.value }.coerceAtLeast(1L)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                DashboardPieChart(
-                    entries = entries,
-                    total = total,
-                    holeColor = qbGlassHoleColor(),
-                    modifier = Modifier.size(132.dp),
-                )
-
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    horizontalAlignment = Alignment.End,
-                ) {
-                    entries.forEachIndexed { index, entry ->
-                        val color = DashboardPiePalette[index % DashboardPiePalette.size]
-                        val share = (entry.value.toFloat() / total.toFloat()).coerceIn(0f, 1f)
-                        DailyUploadLegendRow(
-                            color = color,
-                            label = entry.label,
-                            shareText = formatPercent(share),
-                            valueText = entry.valueText,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun transmissionStateGroupOf(torrent: TorrentInfo): TransmissionStateGroup {
-    val state = normalizeTorrentState(effectiveTorrentState(torrent))
-    return when {
-        state in setOf("uploading", "forcedup") -> TransmissionStateGroup.UPLOADING
-        state == "stalledup" || (torrent.progress >= 1f && state in setOf("pausedup", "stoppedup")) ->
-            TransmissionStateGroup.COMPLETED
-        state in setOf("downloading", "forceddl", "stalleddl", "metadl", "forcedmetadl", "allocating", "moving") ->
-            TransmissionStateGroup.DOWNLOADING
-        state in setOf("checkingdl", "checkingup", "checkingresumedata") ->
-            TransmissionStateGroup.CHECKING
-        state in setOf("queueddl", "queuedup") -> TransmissionStateGroup.QUEUED
-        state in setOf("pauseddl", "pausedup", "stoppeddl", "stoppedup") ->
-            if (torrent.progress >= 1f) TransmissionStateGroup.COMPLETED else TransmissionStateGroup.PAUSED
-        state in setOf("error", "missingfiles") -> TransmissionStateGroup.ERROR
-        torrent.progress >= 1f -> TransmissionStateGroup.COMPLETED
-        else -> TransmissionStateGroup.UNKNOWN
-    }
-}
-
-private fun transmissionTrackerSiteLabel(
-    trackerUrl: String,
-    unknownLabel: String,
-): String {
-    return formatTrackerSiteName(trackerUrl, unknownLabel)
-}
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun DashboardCardHeader(
+private fun DashboardCardHeader(
     title: String,
     showHideButton: Boolean,
     onRevealHide: () -> Unit,
@@ -948,52 +458,77 @@ fun ReorderableDashboardCard(
     card: DashboardChartCard,
     gestureKey: Any,
     isDragging: Boolean,
-    dragOffsetY: Float,
+    isSettling: Boolean,
+    dragOffsetY: () -> Float,
+    settlingOffsetY: () -> Float,
     siblingOffsetY: Float,
+    animateSiblingOffset: Boolean,
+    lockedHeightPx: Int?,
     onDragStart: () -> Unit,
     onDragDelta: (Float) -> Unit,
     onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
     onMeasured: (Int) -> Unit,
     content: @Composable () -> Unit,
 ) {
+    val density = LocalDensity.current
     val draggedScale by animateFloatAsState(
         targetValue = if (isDragging) ReorderDraggedScale else 1f,
-        animationSpec = spring(
-            dampingRatio = 0.84f,
-            stiffness = 520f,
-        ),
+        animationSpec = ReorderScaleAnimationSpec,
         label = "dashboardDraggedScale",
     )
     val animatedSiblingOffset by animateFloatAsState(
         targetValue = siblingOffsetY,
-        animationSpec = spring(
-            dampingRatio = 0.84f,
-            stiffness = 520f,
-        ),
+        animationSpec = if (animateSiblingOffset) {
+            ReorderSiblingOffsetAnimationSpec
+        } else {
+            snap()
+        },
         label = "dashboardSiblingOffset",
     )
     val latestOnDragStart by rememberUpdatedState(onDragStart)
     val latestOnDragDelta by rememberUpdatedState(onDragDelta)
     val latestOnDragEnd by rememberUpdatedState(onDragEnd)
+    val latestOnDragCancel by rememberUpdatedState(onDragCancel)
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .then(
+                if (lockedHeightPx != null) {
+                    Modifier.height(with(density) { lockedHeightPx.toDp() })
+                } else {
+                    Modifier
+                }
+            )
             .onSizeChanged { onMeasured(it.height) }
-            .zIndex(if (isDragging) 1f else 0f)
+            .zIndex(
+                when {
+                    isDragging -> 2f
+                    isSettling -> 1f
+                    else -> 0f
+                },
+            )
             .graphicsLayer {
-                translationY = if (isDragging) dragOffsetY else animatedSiblingOffset
-                shadowElevation = if (isDragging) ReorderDraggedShadow else 0f
-                scaleX = draggedScale
-                scaleY = draggedScale
-                alpha = 1f
+                translationY = when {
+                    isDragging -> dragOffsetY()
+                    isSettling -> settlingOffsetY()
+                    else -> animatedSiblingOffset
+                }
+                shadowElevation = when {
+                    isDragging -> ReorderDraggedShadow
+                    isSettling -> ReorderSettlingShadow
+                    else -> 0f
+                }
+                scaleX = if (isDragging) draggedScale else 1f
+                scaleY = if (isDragging) draggedScale else 1f
                 shape = PanelShape
-                clip = true
+                clip = isDragging || isSettling
             }
             .pointerInput(card, gestureKey) {
                 detectDragGesturesAfterLongPress(
                     onDragStart = { latestOnDragStart() },
                     onDragEnd = { latestOnDragEnd() },
-                    onDragCancel = { latestOnDragEnd() },
+                    onDragCancel = { latestOnDragCancel() },
                     onDrag = { change, dragAmount ->
                         change.consume()
                         latestOnDragDelta(dragAmount.y)
@@ -1070,7 +605,7 @@ private fun DashboardSkeletonCard(
 }
 
 @Composable
-fun DashboardInlineEmptyState(
+private fun DashboardInlineEmptyState(
     text: String,
 ) {
     Box(
@@ -1089,11 +624,27 @@ fun DashboardInlineEmptyState(
 }
 
 @Composable
-fun PieLegendCard(
-    title: String?,
-    entries: List<PieLegendEntry>,
+internal fun DashboardSeedPieCard(
+    title: String,
+    entries: List<PieLegendSeedEntry>,
     emptyText: String,
+    showHideButton: Boolean,
+    onRevealHide: () -> Unit,
+    onHide: () -> Unit,
+    shareColor: Color,
+    compactLegendRows: Boolean = false,
 ) {
+    val resolvedEntries = entries.map { entry ->
+        PieLegendEntry(
+            label = resolveDashboardLegendLabel(entry.label),
+            value = entry.value,
+            valueText = resolveDashboardLegendValueText(
+                value = entry.value,
+                valueKind = entry.valueKind,
+            ),
+        )
+    }
+
     OutlinedCard(
         modifier = Modifier.fillMaxWidth(),
         shape = PanelShape,
@@ -1103,51 +654,49 @@ fun PieLegendCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
+                .padding(horizontal = 13.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            if (!title.isNullOrBlank()) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.secondary,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
+            DashboardCardHeader(
+                title = title,
+                showHideButton = showHideButton,
+                onRevealHide = onRevealHide,
+                onHide = onHide,
+            )
 
-            if (entries.isEmpty()) {
-                Text(
-                    text = emptyText,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
+            if (resolvedEntries.isEmpty()) {
+                DashboardInlineEmptyState(text = emptyText)
                 return@Column
             }
 
-            val total = entries.sumOf { it.value }.coerceAtLeast(1L)
+            val total = resolvedEntries.sumOf { it.value }.coerceAtLeast(1L)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 DashboardPieChart(
-                    entries = entries,
+                    entries = resolvedEntries,
                     total = total,
                     holeColor = qbGlassHoleColor(),
-                    modifier = Modifier.size(150.dp),
+                    modifier = Modifier.size(132.dp),
                 )
 
                 Column(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalAlignment = Alignment.End,
                 ) {
-                    entries.forEachIndexed { index, entry ->
+                    resolvedEntries.forEachIndexed { index, entry ->
                         val color = DashboardPiePalette[index % DashboardPiePalette.size]
                         val share = (entry.value.toFloat() / total.toFloat()).coerceIn(0f, 1f)
-                        PieLegendRow(
+                        DashboardLegendRow(
                             color = color,
                             label = entry.label,
-                            shareText = formatPercent(share),
                             valueText = entry.valueText,
+                            shareText = formatPercent(share),
+                            shareColor = shareColor,
+                            compact = compactLegendRows,
                         )
                     }
                 }
@@ -1156,36 +705,373 @@ fun PieLegendCard(
     }
 }
 
+internal data class ResolvedDashboardBarEntry(
+    val label: String,
+    val value: Long,
+    val valueText: String,
+)
+
+internal data class CompactCountrySummaryItem(
+    val labelText: String,
+    val valueText: String,
+)
+
+internal fun buildCompactCountrySummaryItems(
+    entries: List<ResolvedDashboardBarEntry>,
+): List<CompactCountrySummaryItem> {
+    return entries
+        .take(3)
+        .map { entry ->
+            CompactCountrySummaryItem(
+                labelText = entry.label.trim(),
+                valueText = entry.valueText.trim(),
+            )
+        }
+        .filter { item -> item.labelText.isNotBlank() || item.valueText.isNotBlank() }
+}
+
+internal fun trimDashboardBarEntries(
+    entries: List<DashboardBarSeedEntry>,
+    maxEntries: Int,
+): List<DashboardBarSeedEntry> {
+    if (entries.isEmpty() || maxEntries <= 0) return emptyList()
+    return entries
+        .sortedByDescending { it.value }
+        .take(maxEntries)
+}
+
 @Composable
-fun DashboardChartEmptyState(
-    text: String,
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 116.dp)
-            .background(
-                color = qbGlassEmptyStateColor(),
-                shape = RoundedCornerShape(18.dp),
+private fun resolveDashboardLegendLabel(
+    label: LegendLabelSpec,
+): String {
+    return when (label) {
+        is LegendLabelSpec.Raw -> label.text
+        is LegendLabelSpec.Res -> stringResource(label.resId)
+    }
+}
+
+@Composable
+private fun resolveDashboardLegendValueText(
+    value: Long,
+    valueKind: LegendValueKind,
+): String {
+    return when (valueKind) {
+        LegendValueKind.TORRENT_COUNT -> {
+            val torrentCount = value.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            pluralStringResource(
+                id = R.plurals.chart_category_count,
+                count = torrentCount,
+                torrentCount,
             )
-            .border(
-                width = 1.dp,
-                color = qbGlassOutlineColor(defaultAlpha = 0.18f),
-                shape = RoundedCornerShape(18.dp),
-            )
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = text,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodyMedium,
+        }
+
+        LegendValueKind.BYTES -> formatBytes(value)
+    }
+}
+
+@Composable
+private fun resolveDashboardBarEntries(
+    entries: List<DashboardBarSeedEntry>,
+): List<ResolvedDashboardBarEntry> {
+    return entries.map { entry ->
+        ResolvedDashboardBarEntry(
+            label = resolveDashboardLegendLabel(entry.label),
+            value = entry.value,
+            valueText = resolveDashboardLegendValueText(
+                value = entry.value,
+                valueKind = entry.valueKind,
+            ),
         )
     }
 }
 
 @Composable
-fun DashboardPieChart(
+internal fun DashboardVerticalBarChartCard(
+    title: String,
+    entries: List<DashboardBarSeedEntry>,
+    emptyText: String,
+    showHideButton: Boolean,
+    onRevealHide: () -> Unit,
+    onHide: () -> Unit,
+    accentColor: Color,
+) {
+    val resolvedEntries = resolveDashboardBarEntries(entries)
+
+    OutlinedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = PanelShape,
+        border = BorderStroke(1.dp, qbGlassOutlineColor()),
+        colors = qbGlassCardColors(),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 13.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            DashboardCardHeader(
+                title = title,
+                showHideButton = showHideButton,
+                onRevealHide = onRevealHide,
+                onHide = onHide,
+            )
+
+            DashboardVerticalBarChartContent(
+                entries = resolvedEntries,
+                emptyText = emptyText,
+                accentColor = accentColor,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DashboardVerticalBarChartContent(
+    entries: List<ResolvedDashboardBarEntry>,
+    emptyText: String,
+    accentColor: Color,
+) {
+    if (entries.isEmpty()) {
+        DashboardInlineEmptyState(text = emptyText)
+        return
+    }
+
+    val maxValue = entries.maxOf { it.value }.coerceAtLeast(1L).toFloat()
+    val chartHeight = 212.dp
+    val columnAreaHeight = 124.dp
+    val barHeightRange = 108.dp
+    val minVisibleBarHeight = 6.dp
+    val fixedBarWidth = 18.dp
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = chartHeight),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        entries.forEachIndexed { index, entry ->
+            val ratio = (entry.value.toFloat() / maxValue).coerceIn(0f, 1f)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = entry.valueText,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(columnAreaHeight),
+                    contentAlignment = Alignment.BottomCenter,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(qbGlassOutlineColor(defaultAlpha = 0.2f))
+                            .align(Alignment.BottomCenter),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .width(fixedBarWidth)
+                            .height(
+                                if (entry.value > 0L) {
+                                    (barHeightRange * ratio).coerceAtLeast(minVisibleBarHeight)
+                                } else {
+                                    0.dp
+                                }
+                            )
+                            .background(
+                                color = DashboardPiePalette[index % DashboardPiePalette.size].copy(alpha = 0.92f),
+                                shape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp),
+                            ),
+                    )
+                }
+                Text(
+                    text = entry.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = accentColor,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun DashboardHorizontalBarChartCard(
+    title: String,
+    entries: List<DashboardBarSeedEntry>,
+    emptyText: String,
+    showHideButton: Boolean,
+    onRevealHide: () -> Unit,
+    onHide: () -> Unit,
+) {
+    val resolvedEntries = resolveDashboardBarEntries(entries)
+
+    OutlinedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = PanelShape,
+        border = BorderStroke(1.dp, qbGlassOutlineColor()),
+        colors = qbGlassCardColors(),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 13.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            DashboardCardHeader(
+                title = title,
+                showHideButton = showHideButton,
+                onRevealHide = onRevealHide,
+                onHide = onHide,
+            )
+
+            if (resolvedEntries.isEmpty()) {
+                DashboardInlineEmptyState(text = emptyText)
+                return@Column
+            }
+
+            DashboardHorizontalBarList(
+                entries = resolvedEntries,
+                barColorProvider = { index -> DashboardPiePalette[index % DashboardPiePalette.size] },
+            )
+        }
+    }
+}
+
+@Composable
+private fun DashboardHorizontalBarList(
+    entries: List<ResolvedDashboardBarEntry>,
+    barColorProvider: (Int) -> Color,
+) {
+    val maxValue = entries.maxOf { it.value }.coerceAtLeast(1L).toFloat()
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        entries.forEachIndexed { index, entry ->
+            val fillRatio = (entry.value.toFloat() / maxValue).coerceIn(0f, 1f)
+            val visibleFillRatio = if (entry.value > 0L) {
+                fillRatio.coerceAtLeast(0.05f)
+            } else {
+                0f
+            }
+            val primaryText = buildDashboardDensityPrimaryText(
+                label = entry.label,
+                valueText = entry.valueText,
+            )
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                DashboardCompactMetricRow(
+                    color = barColorProvider(index),
+                    primaryText = primaryText,
+                    shareText = null,
+                    shareColor = MaterialTheme.colorScheme.primary,
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(visibleFillRatio)
+                        .height(10.dp)
+                        .background(
+                            color = barColorProvider(index).copy(alpha = 0.92f),
+                            shape = RoundedCornerShape(999.dp),
+                        ),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DashboardCompactSummaryList(
+    entries: List<ResolvedDashboardBarEntry>,
+    barColorProvider: (Int) -> Color,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        entries.forEachIndexed { index, entry ->
+            DashboardCompactMetricRow(
+                color = barColorProvider(index),
+                primaryText = buildDashboardDensityPrimaryText(
+                    label = entry.label,
+                    valueText = entry.valueText,
+                ),
+                shareText = null,
+                shareColor = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DashboardCompactMetricRow(
+    color: Color,
+    primaryText: String,
+    shareText: String?,
+    shareColor: Color,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(9.dp)
+                .background(color = color, shape = RoundedCornerShape(50)),
+        )
+        Text(
+            text = primaryText,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (!shareText.isNullOrBlank()) {
+            Text(
+                text = shareText,
+                modifier = Modifier.widthIn(min = 52.dp),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium,
+                color = shareColor,
+                maxLines = 1,
+                softWrap = false,
+                textAlign = TextAlign.End,
+            )
+        }
+    }
+}
+
+private fun buildDashboardDensityPrimaryText(
+    label: String,
+    valueText: String,
+): String {
+    val trimmedLabel = label.trim()
+    val trimmedValueText = valueText.trim()
+    if (trimmedLabel.isEmpty()) return trimmedValueText
+    if (trimmedValueText.isEmpty()) return trimmedLabel
+    return "$trimmedLabel $trimmedValueText"
+}
+
+@Composable
+private fun DashboardPieChart(
     entries: List<PieLegendEntry>,
     total: Long,
     holeColor: Color,
@@ -1223,86 +1109,28 @@ fun DashboardPieChart(
 }
 
 @Composable
-fun PieLegendRow(
-    color: Color,
-    label: String,
-    shareText: String,
-    valueText: String,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(10.dp)
-                .background(color = color, shape = RoundedCornerShape(50)),
-        )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = valueText,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Text(
-            text = shareText,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-    }
-}
-
-@Composable
-fun DailyUploadLegendRow(
-    color: Color,
-    label: String,
-    shareText: String,
-    valueText: String,
-) {
-    DashboardLegendRow(
-        color = color,
-        label = label,
-        valueText = valueText,
-        shareText = shareText,
-        shareColor = MaterialTheme.colorScheme.primary,
-    )
-}
-
-@Composable
-fun CategoryLegendRow(
-    color: Color,
-    label: String,
-    shareText: String,
-    valueText: String,
-) {
-    DashboardLegendRow(
-        color = color,
-        label = label,
-        valueText = valueText,
-        shareText = shareText,
-        shareColor = MaterialTheme.colorScheme.secondary,
-    )
-}
-
-@Composable
-fun DashboardLegendRow(
+private fun DashboardLegendRow(
     color: Color,
     label: String,
     valueText: String,
     shareText: String,
     shareColor: Color,
+    compact: Boolean,
 ) {
+    if (compact) {
+        val primaryText = buildDashboardDensityPrimaryText(
+            label = label,
+            valueText = valueText,
+        )
+        DashboardCompactMetricRow(
+            color = color,
+            primaryText = primaryText,
+            shareText = null,
+            shareColor = shareColor,
+        )
+        return
+    }
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(7.dp),
@@ -1348,68 +1176,12 @@ fun DashboardLegendRow(
     }
 }
 
-fun buildCategoryShareEntries(
-    torrents: List<TorrentInfo>,
-    noCategoryLabel: String,
-): List<Pair<String, Long>> {
-    val grouped = mutableMapOf<String, Long>()
-    torrents.forEach { torrent ->
-        val label = normalizeCategoryLabel(
-            category = torrent.category,
-            noCategoryText = noCategoryLabel,
-        )
-        grouped[label] = (grouped[label] ?: 0L) + 1L
-    }
-    return grouped.entries
-        .sortedByDescending { it.value }
-        .map { it.key to it.value }
-}
-
-fun buildTransmissionLabelShareEntries(
-    torrents: List<TorrentInfo>,
-    noTagLabel: String,
-): List<Pair<String, Long>> {
-    val grouped = linkedMapOf<String, Long>()
-    torrents.forEach { torrent ->
-        val tags = parseTags(torrent.tags)
-            .map { it.trim() }
-            .filter { it.isNotBlank() && it != "-" && !it.equals("null", ignoreCase = true) }
-            .distinctBy { it.lowercase() }
-
-        if (tags.isEmpty()) {
-            grouped[noTagLabel] = (grouped[noTagLabel] ?: 0L) + 1L
-        } else {
-            tags.forEach { tag ->
-                grouped[tag] = (grouped[tag] ?: 0L) + 1L
-            }
-        }
-    }
-    return grouped.entries
-        .sortedByDescending { it.value }
-        .map { it.key to it.value }
-}
-
-fun collapsePieEntries(
-    entries: List<Pair<String, Long>>,
-    maxEntries: Int,
-    otherLabel: String,
-): List<Pair<String, Long>> {
-    if (entries.isEmpty()) return emptyList()
-    if (entries.size <= maxEntries) return entries
-
-    val safeMax = maxEntries.coerceAtLeast(2)
-    val head = entries.take(safeMax - 1)
-    val otherValue = entries.drop(safeMax - 1).sumOf { it.second }
-    return if (otherValue > 0L) {
-        head + listOf(otherLabel to otherValue)
-    } else {
-        head
-    }
-}
-
 fun normalizeCategoryLabel(category: String, noCategoryText: String): String {
     val normalized = category.trim()
     if (normalized.isBlank()) return noCategoryText
     if (normalized == "-" || normalized.equals("null", ignoreCase = true)) return noCategoryText
     return normalized
 }
+
+
+

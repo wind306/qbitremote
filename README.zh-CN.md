@@ -4,5 +4,5 @@
 
 - 双语主文档：[`README.md`](README.md)
 - 中文入口：[`README.md#zh-cn`](README.md#zh-cn)
-- 当前版本：`0.1.11 (versionCode 12)`
+- 当前版本：`0.1.15 (versionCode 16)`
 - Google Play 图标：`play-assets/icon/qbitremote-play-icon-512.png`

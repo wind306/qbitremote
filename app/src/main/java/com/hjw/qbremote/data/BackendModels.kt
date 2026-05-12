@@ -62,6 +62,7 @@ interface TorrentBackend {
 
     suspend fun connect(settings: ConnectionSettings): Result<Unit>
     fun clearSession()
+    suspend fun fetchTransferInfo(): Result<TransferInfo>
     suspend fun fetchDashboard(): Result<DashboardData>
     suspend fun fetchDashboardSnapshot(settings: ConnectionSettings): Result<DashboardSnapshotFetchResult>
     suspend fun pauseTorrent(hash: String): Result<Unit>
@@ -113,9 +114,9 @@ fun defaultCapabilitiesFor(backendType: ServerBackendType): ServerCapabilities {
             supportsTags = true,
             supportsCountryDistribution = false,
             supportsExportTorrent = false,
-            supportsRename = false,
-            supportsPerTorrentSpeedLimit = false,
-            supportsShareRatio = false,
+            supportsRename = true,
+            supportsPerTorrentSpeedLimit = true,
+            supportsShareRatio = true,
             supportsTrackers = true,
             supportsTrackerMutation = true,
             supportsReannounce = true,

@@ -60,6 +60,8 @@
         <item quantity="other">%1$d 个种子</item>
     </plurals>
     <string name="dashboard_category_share_title">分类占比</string>
+    <string name="dashboard_size_distribution_title">种子体积分布</string>
+    <string name="dashboard_share_ratio_distribution_title">分享率分布</string>
     <string name="dashboard_daily_tag_upload_empty">当前自然日暂无上传数据。</string>
     <string name="dashboard_upload_title">上传量</string>
     <string name="dashboard_upload_title_with_date">上传量（%1$s）</string>
@@ -72,6 +74,15 @@
     <string name="dashboard_country_flow_title">今日已观测上传分布</string>
     <string name="dashboard_country_flow_empty">当前暂无可观测的国家上传数据。</string>
     <string name="dashboard_country_flow_note">数据仅基于当前活跃连接的 peer 观测增量，可能低于实际全天上传总量。</string>
+    <string name="chart_size_bucket_under_one_gb">&lt;1 GB</string>
+    <string name="chart_size_bucket_one_to_ten_gb">1–10 GB</string>
+    <string name="chart_size_bucket_ten_to_fifty_gb">10–50 GB</string>
+    <string name="chart_size_bucket_fifty_plus_gb">50+ GB</string>
+    <string name="chart_ratio_bucket_under_half">&lt;0.5</string>
+    <string name="chart_ratio_bucket_half_to_one">0.5–1</string>
+    <string name="chart_ratio_bucket_one_to_two">1–2</string>
+    <string name="chart_ratio_bucket_two_to_five">2–5</string>
+    <string name="chart_ratio_bucket_five_plus">5+</string>
     <string name="dismiss_hint">关闭提示</string>
 
     <string name="status_uploading">上传中</string>
@@ -153,6 +164,7 @@
     <string name="sort_share_ratio">分享比率</string>
     <string name="sort_total_uploaded">总计上传</string>
     <string name="sort_total_downloaded">总计下载</string>
+    <string name="free_space_label">剩余空间</string>
     <string name="sort_torrent_size">种子大小</string>
     <string name="sort_activity_time">活动时间</string>
     <string name="sort_seeders">做种人数</string>

@@ -1,4 +1,4 @@
-package com.hjw.qbremote.data
+﻿package com.hjw.qbremote.data
 
 import android.content.Context
 import androidx.datastore.preferences.core.Preferences
@@ -14,6 +14,7 @@ import com.hjw.qbremote.data.model.CountryUploadRecord
 import com.hjw.qbremote.data.model.TorrentInfo
 import com.hjw.qbremote.data.model.TransferInfo
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import java.net.URI
@@ -152,7 +153,8 @@ data class DeleteServerProfileResult(
 
 data class DailyUploadTrackingSnapshot(
     val date: String = "",
-    val baselineByTorrent: Map<String, Long> = emptyMap(),
+    val totalsByTag: Map<String, Long> = emptyMap(),
+    val countedTagsByTorrent: Map<String, List<String>> = emptyMap(),
     val lastSeenByTorrent: Map<String, Long> = emptyMap(),
 )
 
@@ -171,6 +173,7 @@ data class HomeSpeedHistoryPoint(
 )
 
 data class HomeAggregateSpeedHistorySnapshot(
+    val scopeKey: String = "",
     val points: List<HomeSpeedHistoryPoint> = emptyList(),
 )
 
@@ -195,8 +198,14 @@ data class CachedDailyTagUploadStat(
 )
 
 data class ServerDashboardPreferences(
-    val visibleCards: List<String> = listOf("country_flow", "category_share", "daily_upload"),
-    val cardOrder: String = "country_flow,category_share,daily_upload",
+    val visibleCards: List<String> = listOf(
+        "country_flow",
+        "category_share",
+        "size_distribution",
+        "share_ratio_distribution",
+        "daily_upload",
+    ),
+    val cardOrder: String = "country_flow,category_share,size_distribution,share_ratio_distribution,daily_upload",
     val hasSeenStackReorderHint: Boolean = false,
     val hasSeenDashboardSwipeHint: Boolean = false,
     val hasSeenDashboardCardHint: Boolean = false,
@@ -214,7 +223,7 @@ enum class AppTheme {
     CUSTOM,
 }
 
-class ConnectionStore(private val context: Context) {
+class ConnectionStore(internal val context: Context) {
     private val secureCredentials = SecureCredentialStore(context)
     private val gson = Gson()
     private val serverProfileListType = object : TypeToken<List<ServerProfile>>() {}.type
@@ -263,7 +272,7 @@ class ConnectionStore(private val context: Context) {
     val settingsFlow: Flow<ConnectionSettings> = context.dataStore.data.map { pref ->
         val activeProfileId = pref[Keys.ActiveServerProfileId].orEmpty()
         pref.toSettings(resolvePassword(activeProfileId))
-    }
+    }.distinctUntilChanged()
 
     val serverProfilesFlow: Flow<ServerProfilesState> = context.dataStore.data.map { pref ->
         val profiles = parseProfiles(pref[Keys.ServerProfilesJson])
@@ -277,7 +286,7 @@ class ConnectionStore(private val context: Context) {
             profiles = profiles,
             activeProfileId = active,
         )
-    }
+    }.distinctUntilChanged()
 
     suspend fun save(settings: ConnectionSettings) {
         val pref = context.dataStore.data.first()
@@ -604,9 +613,7 @@ class ConnectionStore(private val context: Context) {
                     target[Keys.RefreshSeconds] = nextProfile.refreshSeconds
                 }
             }
-            if (profiles.isEmpty()) {
-                target.remove(Keys.HomeAggregateSpeedHistoryJson)
-            }
+            target.remove(Keys.HomeAggregateSpeedHistoryJson)
         }
 
         return DeleteServerProfileResult(
@@ -630,8 +637,12 @@ class ConnectionStore(private val context: Context) {
         if (scopeKey.isBlank()) return
         context.dataStore.edit { target ->
             val snapshots = parseDailyUploadTrackingSnapshots(target[Keys.DailyUploadTrackingJson]).toMutableMap()
-            snapshots[scopeKey] = snapshot.normalized()
-            target[Keys.DailyUploadTrackingJson] = gson.toJson(snapshots)
+            val updated = upsertNormalizedEntryIfChanged(
+                entries = snapshots,
+                rawKey = scopeKey,
+                value = snapshot.normalized(),
+            ) ?: return@edit
+            target[Keys.DailyUploadTrackingJson] = gson.toJson(updated)
         }
     }
 
@@ -651,15 +662,26 @@ class ConnectionStore(private val context: Context) {
             val snapshots = parseDailyCountryUploadTrackingSnapshots(
                 target[Keys.DailyCountryUploadTrackingJson]
             ).toMutableMap()
-            snapshots[scopeKey] = snapshot.normalized()
-            target[Keys.DailyCountryUploadTrackingJson] = gson.toJson(snapshots)
+            val updated = upsertNormalizedEntryIfChanged(
+                entries = snapshots,
+                rawKey = scopeKey,
+                value = snapshot.normalized(),
+            ) ?: return@edit
+            target[Keys.DailyCountryUploadTrackingJson] = gson.toJson(updated)
         }
     }
 
     suspend fun loadDashboardCacheSnapshot(scopeKey: String): DashboardCacheSnapshot? {
         if (scopeKey.isBlank()) return null
         val pref = context.dataStore.data.first()
-        val snapshots = parseDashboardCacheSnapshots(pref[Keys.DashboardCacheJson])
+        val raw = pref[Keys.DashboardCacheJson]
+        if (isOversizedDashboardPersistencePayload(raw)) {
+            context.dataStore.edit { target ->
+                target.remove(Keys.DashboardCacheJson)
+            }
+            return null
+        }
+        val snapshots = parseDashboardCacheSnapshots(raw)
         return snapshots[scopeKey]
     }
 
@@ -670,27 +692,51 @@ class ConnectionStore(private val context: Context) {
         if (scopeKey.isBlank()) return
         context.dataStore.edit { target ->
             val snapshots = parseDashboardCacheSnapshots(target[Keys.DashboardCacheJson]).toMutableMap()
-            snapshots[scopeKey] = snapshot.normalized()
-            target[Keys.DashboardCacheJson] = gson.toJson(snapshots)
+            val updated = upsertNormalizedEntryIfChanged(
+                entries = snapshots,
+                rawKey = scopeKey,
+                value = sanitizeDashboardCacheForPersistence(snapshot).normalized(),
+            ) ?: return@edit
+            target[Keys.DashboardCacheJson] = gson.toJson(updated)
         }
     }
 
     suspend fun loadDashboardServerSnapshots(): Map<String, CachedDashboardServerSnapshot> {
         val pref = context.dataStore.data.first()
-        return parseDashboardServerSnapshots(pref[Keys.DashboardServerSnapshotsJson])
+        val raw = pref[Keys.DashboardServerSnapshotsJson]
+        if (isOversizedDashboardPersistencePayload(raw)) {
+            context.dataStore.edit { target ->
+                target.remove(Keys.DashboardServerSnapshotsJson)
+            }
+            return emptyMap()
+        }
+        return parseDashboardServerSnapshots(raw).mapValues { (_, snapshot) ->
+            sanitizeDashboardServerSnapshotForPersistence(snapshot)
+        }
     }
 
-    suspend fun loadHomeAggregateSpeedHistorySnapshot(): HomeAggregateSpeedHistorySnapshot {
+    suspend fun loadHomeAggregateSpeedHistorySnapshot(scopeKey: String): HomeAggregateSpeedHistorySnapshot? {
+        val normalizedScopeKey = scopeKey.trim()
+        if (normalizedScopeKey.isBlank()) return null
         val pref = context.dataStore.data.first()
-        return parseHomeAggregateSpeedHistorySnapshot(pref[Keys.HomeAggregateSpeedHistoryJson])
+        val snapshot = parseHomeAggregateSpeedHistorySnapshot(pref[Keys.HomeAggregateSpeedHistoryJson])
+        return if (snapshot.scopeKey == normalizedScopeKey) snapshot else null
     }
 
-    suspend fun saveHomeAggregateSpeedHistorySnapshot(snapshot: HomeAggregateSpeedHistorySnapshot) {
+    suspend fun saveHomeAggregateSpeedHistorySnapshot(
+        scopeKey: String,
+        snapshot: HomeAggregateSpeedHistorySnapshot,
+    ) {
         context.dataStore.edit { target ->
-            val normalized = snapshot.normalized()
-            if (normalized.points.isEmpty()) {
-                target.remove(Keys.HomeAggregateSpeedHistoryJson)
-            } else {
+            val normalized = normalizeHomeAggregateSpeedHistoryForPersistence(
+                scopeKey = scopeKey,
+                snapshot = snapshot,
+            )
+            if (normalized == null) {
+                if (target.contains(Keys.HomeAggregateSpeedHistoryJson)) {
+                    target.remove(Keys.HomeAggregateSpeedHistoryJson)
+                }
+            } else if (parseHomeAggregateSpeedHistorySnapshot(target[Keys.HomeAggregateSpeedHistoryJson]) != normalized) {
                 target[Keys.HomeAggregateSpeedHistoryJson] = gson.toJson(normalized)
             }
         }
@@ -745,8 +791,12 @@ class ConnectionStore(private val context: Context) {
         if (profileId.isBlank()) return
         context.dataStore.edit { target ->
             val snapshots = parseDashboardServerSnapshots(target[Keys.DashboardServerSnapshotsJson]).toMutableMap()
-            snapshots[profileId] = snapshot.normalized()
-            target[Keys.DashboardServerSnapshotsJson] = gson.toJson(snapshots)
+            val updated = upsertNormalizedEntryIfChanged(
+                entries = snapshots,
+                rawKey = profileId,
+                value = sanitizeDashboardServerSnapshotForPersistence(snapshot).normalized(),
+            ) ?: return@edit
+            target[Keys.DashboardServerSnapshotsJson] = gson.toJson(updated)
         }
     }
 
@@ -953,10 +1003,18 @@ class ConnectionStore(private val context: Context) {
     private fun DailyUploadTrackingSnapshot.normalized(): DailyUploadTrackingSnapshot {
         return copy(
             date = date.trim(),
-            baselineByTorrent = baselineByTorrent
+            totalsByTag = totalsByTag
+                .mapKeys { it.key.trim() }
                 .filterKeys { it.isNotBlank() }
                 .mapValues { (_, value) -> value.coerceAtLeast(0L) },
-            lastSeenByTorrent = lastSeenByTorrent
+            countedTagsByTorrent = if (countedTagsByTorrent.size > 500) emptyMap() else countedTagsByTorrent
+                .filterKeys { it.isNotBlank() }
+                .mapValues { (_, tags) ->
+                    tags.map { it.trim() }
+                        .filter { it.isNotBlank() }
+                        .distinctBy { it.lowercase() }
+                },
+            lastSeenByTorrent = if (lastSeenByTorrent.size > 500) emptyMap() else lastSeenByTorrent
                 .filterKeys { it.isNotBlank() }
                 .mapValues { (_, value) -> value.coerceAtLeast(0L) },
         )
@@ -969,7 +1027,7 @@ class ConnectionStore(private val context: Context) {
                 .mapKeys { it.key.trim().uppercase() }
                 .filterKeys { it.isNotBlank() }
                 .mapValues { (_, value) -> value.coerceAtLeast(0L) },
-            peerSnapshots = peerSnapshots
+            peerSnapshots = if (peerSnapshots.size > 1000) emptyMap() else peerSnapshots
                 .filterKeys { it.isNotBlank() }
                 .mapValues { (_, snapshot) ->
                     snapshot.copy(
@@ -980,7 +1038,7 @@ class ConnectionStore(private val context: Context) {
                         uploadedBytes = snapshot.uploadedBytes.coerceAtLeast(0L),
                     )
                 },
-            lastSeenByTorrent = lastSeenByTorrent
+            lastSeenByTorrent = if (lastSeenByTorrent.size > 500) emptyMap() else lastSeenByTorrent
                 .filterKeys { it.isNotBlank() }
                 .mapValues { (_, value) -> value.coerceAtLeast(0L) },
         )
@@ -988,6 +1046,7 @@ class ConnectionStore(private val context: Context) {
 
     private fun DashboardCacheSnapshot.normalized(): DashboardCacheSnapshot {
         return copy(
+            torrents = sanitizeDashboardCacheForPersistence(this).torrents,
             dailyTagUploadDate = dailyTagUploadDate.trim(),
             dailyTagUploadStats = dailyTagUploadStats.map { it.copy(tag = it.tag.trim()) },
             dailyCountryUploadDate = dailyCountryUploadDate.trim(),
@@ -1012,6 +1071,7 @@ class ConnectionStore(private val context: Context) {
 
     private fun HomeAggregateSpeedHistorySnapshot.normalized(): HomeAggregateSpeedHistorySnapshot {
         return copy(
+            scopeKey = scopeKey.trim(),
             points = points
                 .map { it.normalized() }
                 .sortedBy { it.timestamp },
@@ -1020,6 +1080,7 @@ class ConnectionStore(private val context: Context) {
 
     private fun CachedDashboardServerSnapshot.normalized(): CachedDashboardServerSnapshot {
         return copy(
+            torrents = sanitizeDashboardServerSnapshotForPersistence(this).torrents,
             profileId = profileId.trim(),
             profileName = profileName.trim(),
             host = host.trim(),
@@ -1072,6 +1133,7 @@ class ConnectionStore(private val context: Context) {
                 DASHBOARD_CARD_COUNTRY_FLOW,
                 DASHBOARD_CARD_CATEGORY_SHARE,
                 DASHBOARD_CARD_DAILY_UPLOAD,
+                DASHBOARD_CARD_TRACKER_SITE,
             )
             ServerBackendType.TRANSMISSION -> listOf(
                 DASHBOARD_CARD_CATEGORY_SHARE,
@@ -1166,3 +1228,4 @@ class ConnectionStore(private val context: Context) {
         }
     }
 }
+

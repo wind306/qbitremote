@@ -214,12 +214,15 @@ internal fun TorrentOperationDetailCard(
     }
 
     val fileTree = remember(torrent.hash, detailFiles) { buildTorrentFileTree(detailFiles) }
-    val currentFileTreeNode = remember(fileTree, fileBrowserPath) {
-        resolveTorrentFileTreeNode(fileTree, fileBrowserPath) ?: fileTree
+    val fileBrowserSelection = remember(fileTree, fileBrowserPath) {
+        resolveTorrentFileBrowserSelection(
+            root = fileTree,
+            pathSegments = fileBrowserPath,
+        )
     }
-    LaunchedEffect(torrent.hash, detailFiles) {
-        if (resolveTorrentFileTreeNode(fileTree, fileBrowserPath) == null) {
-            fileBrowserPath = emptyList()
+    LaunchedEffect(fileBrowserSelection.pathSegments) {
+        if (fileBrowserSelection.pathSegments != fileBrowserPath) {
+            fileBrowserPath = fileBrowserSelection.pathSegments
         }
     }
 
@@ -235,7 +238,9 @@ internal fun TorrentOperationDetailCard(
         stringResource(R.string.detail_peer_ratio_label) to formatRatio(torrent.ratio),
         stringResource(R.string.detail_peer_activity_label) to formatActiveAgo(torrent.lastActivity),
     )
-    val hasMutableTrackers = detailTrackers.any { isMutableTrackerUrl(it.url) }
+    val hasMutableTrackers = remember(detailTrackers) {
+        detailTrackers.any { tracker -> isMutableTrackerUrl(tracker.url) }
+    }
 
     OutlinedCard(
         modifier = Modifier.fillMaxWidth(),
@@ -279,500 +284,704 @@ internal fun TorrentOperationDetailCard(
 
             when (selectedTab) {
                 0 -> {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Text(
-                            stringResource(R.string.detail_section_basic),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        DetailReadonlyActionRow(
-                            label = stringResource(R.string.detail_hash_label),
-                            value = torrent.hash.ifBlank { "-" },
-                            actionText = stringResource(R.string.copy),
-                            enabled = !isPending && torrent.hash.isNotBlank(),
-                            onAction = onCopyHash,
-                        )
-                        DetailReadonlyActionRow(
-                            label = stringResource(R.string.detail_magnet_label),
-                            value = magnetUri.ifBlank { "-" },
-                            actionText = stringResource(R.string.copy),
-                            enabled = !isPending && magnetUri.isNotBlank(),
-                            onAction = { onCopyMagnet(magnetUri) },
-                        )
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            contentPadding = PaddingValues(0.dp),
-                        ) {
-                            if (capabilities.supportsExportTorrent) {
-                                item {
-                                    DetailInlineActionButton(
-                                        text = stringResource(R.string.detail_export_torrent),
-                                        enabled = !isPending && torrent.hash.isNotBlank(),
-                                        accentColor = MaterialTheme.colorScheme.secondary,
-                                        onClick = onExportTorrent,
-                                    )
-                                }
-                            }
-                            if (capabilities.supportsReannounce) {
-                                item {
-                                    DetailInlineActionButton(
-                                        text = stringResource(R.string.detail_reannounce),
-                                        enabled = !isPending && torrent.hash.isNotBlank(),
-                                        accentColor = Color(0xFF4C8DFF),
-                                        onClick = onReannounce,
-                                    )
-                                }
-                            }
-                            if (capabilities.supportsRecheck) {
-                                item {
-                                    DetailInlineActionButton(
-                                        text = stringResource(R.string.detail_recheck),
-                                        enabled = !isPending && torrent.hash.isNotBlank(),
-                                        accentColor = Color(0xFFF3A53C),
-                                        onClick = onRecheck,
-                                    )
-                                }
-                            }
-                        }
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
-                        if (capabilities.supportsRename) {
-                            Text(
-                                stringResource(R.string.detail_section_name),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            ActionInputRow(
-                                label = stringResource(R.string.detail_new_name_label),
-                                value = renameText,
-                                onValueChange = { renameText = it },
-                                actionText = stringResource(R.string.detail_action_change),
-                                enabled = !isPending,
-                                onAction = { onRename(renameText.trim()) },
-                            )
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
-                        }
-                        Text(
-                            stringResource(R.string.detail_section_path),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            text = stringResource(R.string.detail_set_path_hint),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        ActionInputRow(
-                            label = stringResource(R.string.detail_save_path_label),
-                            value = locationText,
-                            onValueChange = { locationText = it },
-                            actionText = stringResource(R.string.detail_action_change),
-                            enabled = !isPending,
-                            onAction = { onSetLocation(locationText.trim()) },
-                        )
-                        if (capabilities.supportsCategories) {
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
-                            Text(
-                                stringResource(R.string.detail_section_category),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            if (categoryOptions.isNotEmpty()) {
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    contentPadding = PaddingValues(0.dp),
-                                ) {
-                                    items(categoryOptions, key = { it }) { option ->
-                                        TorrentMetaChip(
-                                            text = option,
-                                            containerColor = if (option == categoryTextInput) Color(0xFF5D7CFF) else Color(0xFF4D4D4D),
-                                            contentColor = Color(0xFFEAF0FF),
-                                            onClick = { categoryTextInput = option },
-                                        )
-                                    }
-                                }
-                            }
-                            ActionInputRow(
-                                label = stringResource(R.string.detail_category_label),
-                                value = categoryTextInput,
-                                onValueChange = { categoryTextInput = it },
-                                actionText = stringResource(R.string.detail_action_change),
-                                enabled = !isPending,
-                                onAction = { onSetCategory(categoryTextInput.trim()) },
-                            )
-                        }
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
-                        Text(
-                            stringResource(R.string.detail_section_tags),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        if (tagOptions.isNotEmpty()) {
-                            LazyRow(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                contentPadding = PaddingValues(0.dp),
-                            ) {
-                                items(tagOptions, key = { it }) { option ->
-                                    val selected = parseTags(tagsTextInput).contains(option)
-                                    TorrentMetaChip(
-                                        text = option,
-                                        containerColor = if (selected) Color(0xFF5D7CFF) else Color(0xFF4D4D4D),
-                                        contentColor = Color(0xFFEAF0FF),
-                                        onClick = { tagsTextInput = toggleTag(tagsTextInput, option) },
-                                    )
-                                }
-                            }
-                        }
-                        ActionInputRow(
-                            label = stringResource(R.string.detail_tags_label),
-                            value = tagsTextInput,
-                            onValueChange = { tagsTextInput = it },
-                            actionText = stringResource(R.string.detail_action_change),
-                            enabled = !isPending,
-                            onAction = { onSetTags(torrent.tags, tagsTextInput.trim()) },
-                        )
-                        if (capabilities.supportsPerTorrentSpeedLimit) {
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
-                            Text(
-                                stringResource(R.string.detail_section_speed_limit),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                OutlinedTextField(
-                                    value = downloadLimitText,
-                                    onValueChange = { downloadLimitText = it },
-                                    modifier = Modifier.weight(1f),
-                                    label = { Text(stringResource(R.string.detail_download_kb_label)) },
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    enabled = !isPending,
-                                )
-                                OutlinedTextField(
-                                    value = uploadLimitText,
-                                    onValueChange = { uploadLimitText = it },
-                                    modifier = Modifier.weight(1f),
-                                    label = { Text(stringResource(R.string.detail_upload_kb_label)) },
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    enabled = !isPending,
-                                )
-                                TextButton(
-                                    onClick = { onSetSpeedLimit(downloadLimitText, uploadLimitText) },
-                                    enabled = !isPending,
-                                    modifier = Modifier.background(
-                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
-                                        shape = RoundedCornerShape(8.dp),
-                                    ),
-                                ) {
-                                    Text(stringResource(R.string.detail_action_apply))
-                                }
-                            }
-                        }
-                        if (capabilities.supportsShareRatio) {
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
-                            Text(
-                                stringResource(R.string.detail_section_ratio),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            ActionInputRow(
-                                label = stringResource(R.string.detail_ratio_label),
-                                value = ratioText,
-                                onValueChange = { ratioText = it },
-                                actionText = stringResource(R.string.detail_action_apply),
-                                enabled = !isPending,
-                                onAction = { onSetShareRatio(ratioText.trim()) },
-                            )
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            TextButton(
-                                onClick = { if (paused) onResume() else onPause() },
-                                enabled = !isPending,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f), RoundedCornerShape(8.dp)),
-                            ) {
-                                Text(if (paused) stringResource(R.string.resume) else stringResource(R.string.pause))
-                            }
-                            TextButton(
-                                onClick = {
-                                    deleteFilesChecked = deleteFilesDefault ||
-                                        (deleteFilesWhenNoSeeders && torrent.seeders <= 0)
-                                    showDeleteDialog = true
-                                },
-                                enabled = !isPending,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .background(MaterialTheme.colorScheme.error.copy(alpha = 0.14f), RoundedCornerShape(8.dp)),
-                            ) {
-                                Text(stringResource(R.string.delete))
-                            }
-                        }
-                    }
+                    TorrentDetailInfoTab(
+                        torrent = torrent,
+                        capabilities = capabilities,
+                        isPending = isPending,
+                        magnetUri = magnetUri,
+                        categoryOptions = categoryOptions,
+                        tagOptions = tagOptions,
+                        paused = paused,
+                        renameText = renameText,
+                        locationText = locationText,
+                        categoryTextInput = categoryTextInput,
+                        tagsTextInput = tagsTextInput,
+                        downloadLimitText = downloadLimitText,
+                        uploadLimitText = uploadLimitText,
+                        ratioText = ratioText,
+                        onRenameTextChange = { renameText = it },
+                        onLocationTextChange = { locationText = it },
+                        onCategoryTextChange = { categoryTextInput = it },
+                        onTagsTextChange = { tagsTextInput = it },
+                        onDownloadLimitTextChange = { downloadLimitText = it },
+                        onUploadLimitTextChange = { uploadLimitText = it },
+                        onRatioTextChange = { ratioText = it },
+                        onCopyHash = onCopyHash,
+                        onCopyMagnet = { onCopyMagnet(magnetUri) },
+                        onExportTorrent = onExportTorrent,
+                        onRename = { onRename(renameText.trim()) },
+                        onSetLocation = { onSetLocation(locationText.trim()) },
+                        onSetCategory = { onSetCategory(categoryTextInput.trim()) },
+                        onSetTags = { onSetTags(torrent.tags, tagsTextInput.trim()) },
+                        onSetSpeedLimit = { onSetSpeedLimit(downloadLimitText, uploadLimitText) },
+                        onSetShareRatio = { onSetShareRatio(ratioText.trim()) },
+                        onReannounce = onReannounce,
+                        onRecheck = onRecheck,
+                        onPauseResume = { if (paused) onResume() else onPause() },
+                        onRequestDelete = {
+                            deleteFilesChecked = deleteFilesDefault ||
+                                (deleteFilesWhenNoSeeders && torrent.seeders <= 0)
+                            showDeleteDialog = true
+                        },
+                    )
                 }
                 1 -> {
-                    if (detailLoading && detailTrackers.isEmpty()) {
-                        Text(
-                            stringResource(R.string.loading),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        TorrentMetaChip(
-                            text = pluralStringResource(
-                                R.plurals.detail_tracker_count,
-                                detailTrackers.size,
-                                detailTrackers.size,
-                            ),
-                            containerColor = Color(0xFF6C3FD3),
-                            contentColor = Color.White,
-                        )
-                        if (hasMutableTrackers) {
-                            TextButton(
-                                onClick = { trackersPasskeyVisible = !trackersPasskeyVisible },
-                            ) {
-                                Icon(
-                                    painter = painterResource(
-                                        id = if (trackersPasskeyVisible) R.drawable.ic_password_hidden else R.drawable.ic_password_visible
-                                    ),
-                                    contentDescription = stringResource(
-                                        if (trackersPasskeyVisible) R.string.detail_hide_passkey else R.string.detail_show_passkey
-                                    ),
-                                    tint = MaterialTheme.colorScheme.primary,
-                                )
-                            }
-                        }
-                    }
-                    if (detailTrackers.isEmpty()) {
-                        Text(
-                            text = stringResource(R.string.no_tracker_info),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        detailTrackers.forEach { tracker ->
-                            val isMutableTracker = isMutableTrackerUrl(tracker.url)
-                            TrackerInfoCard(
-                                tracker = tracker,
-                                displayUrl = when {
-                                    !isMutableTracker -> tracker.url.ifBlank { "-" }
-                                    trackersPasskeyVisible -> tracker.url.ifBlank { "-" }
-                                    else -> maskTrackerUrl(tracker.url)
-                                },
-                                allowMutation = capabilities.supportsTrackerMutation && isMutableTracker,
-                                onCopy = if (!isPending && isMutableTracker && tracker.url.isNotBlank()) {
-                                    { onCopyTracker(tracker) }
-                                } else {
-                                    null
-                                },
-                                onEdit = if (
-                                    !isPending &&
-                                    capabilities.supportsTrackerMutation &&
-                                    isMutableTracker &&
-                                    tracker.url.isNotBlank()
-                                ) {
-                                    {
-                                        editingTracker = tracker
-                                        editingTrackerUrl = tracker.url
-                                    }
-                                } else {
-                                    null
-                                },
-                                onDelete = if (
-                                    !isPending &&
-                                    capabilities.supportsTrackerMutation &&
-                                    isMutableTracker &&
-                                    tracker.url.isNotBlank()
-                                ) {
-                                    { pendingDeleteTracker = tracker }
-                                } else {
-                                    null
-                                },
-                            )
-                        }
-                    }
+                    TorrentDetailTrackersTab(
+                        detailLoading = detailLoading,
+                        detailTrackers = detailTrackers,
+                        hasMutableTrackers = hasMutableTrackers,
+                        trackersPasskeyVisible = trackersPasskeyVisible,
+                        isPending = isPending,
+                        supportsTrackerMutation = capabilities.supportsTrackerMutation,
+                        onTogglePasskeyVisibility = {
+                            trackersPasskeyVisible = !trackersPasskeyVisible
+                        },
+                        onCopyTracker = onCopyTracker,
+                        onEditTracker = { tracker, trackerUrl ->
+                            editingTracker = tracker
+                            editingTrackerUrl = trackerUrl
+                        },
+                        onDeleteTracker = { tracker ->
+                            pendingDeleteTracker = tracker
+                        },
+                    )
                 }
                 2 -> {
-                    TorrentUnifiedInfoPanel(items = peerOverviewItems)
+                    TorrentDetailPeersTab(
+                        peerOverviewItems = peerOverviewItems,
+                    )
                 }
                 3 -> {
-                    if (detailLoading) {
-                        Text(
-                            stringResource(R.string.loading_files),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else if (detailFiles.isEmpty()) {
-                        Text(
-                            stringResource(R.string.no_file_details),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            contentPadding = PaddingValues(0.dp),
-                        ) {
-                            item {
-                                TorrentMetaChip(
-                                    text = stringResource(R.string.detail_files_root),
-                                    containerColor = if (fileBrowserPath.isEmpty()) Color(0xFF4469FF) else Color(0xFF2E3340),
-                                    contentColor = Color.White,
-                                    onClick = { fileBrowserPath = emptyList() },
-                                )
+                    TorrentDetailFilesTab(
+                        detailLoading = detailLoading,
+                        detailFiles = detailFiles,
+                        fileBrowserPath = fileBrowserPath,
+                        fileBrowserSelection = fileBrowserSelection,
+                        onOpenRoot = { fileBrowserPath = emptyList() },
+                        onOpenPathSegment = { index ->
+                            fileBrowserPath = fileBrowserPath.take(index + 1)
+                        },
+                        onOpenDirectory = { node ->
+                            if (node.isDirectory) {
+                                fileBrowserPath = node.pathSegments
                             }
-                            fileBrowserPath.forEachIndexed { index, segment ->
-                                item {
-                                    Text(
-                                        text = "/",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(top = 5.dp),
-                                    )
-                                }
-                                item {
-                                    TorrentMetaChip(
-                                        text = segment,
-                                        containerColor = if (index == fileBrowserPath.lastIndex) Color(0xFF5D7CFF) else Color(0xFF2E3340),
-                                        contentColor = Color.White,
-                                        onClick = { fileBrowserPath = fileBrowserPath.take(index + 1) },
-                                    )
-                                }
-                            }
-                        }
-                        currentFileTreeNode.children.forEach { node ->
-                            TorrentFileBrowserNodeCard(
-                                node = node,
-                                onOpenDirectory = {
-                                    if (node.isDirectory) {
-                                        fileBrowserPath = node.pathSegments
-                                    }
-                                },
-                            )
-                        }
-                    }
+                        },
+                    )
                 }
             }
         }
     }
 
-    if (showDeleteDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            shape = PanelShape,
-            containerColor = qbGlassStrongContainerColor(),
-            title = { Text(stringResource(R.string.delete_torrent_title)) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(stringResource(R.string.delete_torrent_desc))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Checkbox(
-                            checked = deleteFilesChecked,
-                            onCheckedChange = { deleteFilesChecked = it },
-                        )
-                        Text(stringResource(R.string.delete_files))
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteDialog = false
-                        onDelete(deleteFilesChecked)
-                    },
-                    enabled = !isPending,
-                ) {
-                    Text(stringResource(R.string.delete))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-        )
-    }
+    TorrentDeleteDialog(
+        visible = showDeleteDialog,
+        deleteFilesChecked = deleteFilesChecked,
+        isPending = isPending,
+        onDeleteFilesCheckedChange = { deleteFilesChecked = it },
+        onDismiss = { showDeleteDialog = false },
+        onConfirm = {
+            showDeleteDialog = false
+            onDelete(deleteFilesChecked)
+        },
+    )
 
     val editingTrackerState = editingTracker
-    if (editingTrackerState != null) {
-        AlertDialog(
-            onDismissRequest = { editingTracker = null },
-            shape = PanelShape,
-            containerColor = qbGlassStrongContainerColor(),
-            title = { Text(stringResource(R.string.detail_tracker_edit_title)) },
-            text = {
-                OutlinedTextField(
-                    value = editingTrackerUrl,
-                    onValueChange = { editingTrackerUrl = it },
-                    label = { Text(stringResource(R.string.detail_tracker_url_label)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    enabled = !isPending,
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        editingTracker = null
-                        onEditTracker(editingTrackerState, editingTrackerUrl.trim())
-                    },
-                    enabled = !isPending && editingTrackerUrl.trim().isNotBlank(),
-                ) {
-                    Text(stringResource(R.string.server_save_action))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { editingTracker = null }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-        )
-    }
+    TorrentEditTrackerDialog(
+        tracker = editingTrackerState,
+        trackerUrl = editingTrackerUrl,
+        isPending = isPending,
+        onTrackerUrlChange = { editingTrackerUrl = it },
+        onDismiss = { editingTracker = null },
+        onConfirm = { tracker ->
+            editingTracker = null
+            onEditTracker(tracker, editingTrackerUrl.trim())
+        },
+    )
 
     val deleteTrackerState = pendingDeleteTracker
-    if (deleteTrackerState != null) {
-        AlertDialog(
-            onDismissRequest = { pendingDeleteTracker = null },
-            shape = PanelShape,
-            containerColor = qbGlassStrongContainerColor(),
-            title = { Text(stringResource(R.string.detail_tracker_delete_title)) },
-            text = { Text(stringResource(R.string.detail_tracker_delete_desc)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        pendingDeleteTracker = null
-                        onDeleteTracker(deleteTrackerState)
-                    },
-                    enabled = !isPending,
+    TorrentDeleteTrackerDialog(
+        tracker = deleteTrackerState,
+        isPending = isPending,
+        onDismiss = { pendingDeleteTracker = null },
+        onConfirm = { tracker ->
+            pendingDeleteTracker = null
+            onDeleteTracker(tracker)
+        },
+    )
+}
+
+internal enum class TorrentDetailPrimaryAction {
+    ExportTorrent,
+    Reannounce,
+    Recheck,
+}
+
+internal fun torrentDetailPrimaryActions(capabilities: ServerCapabilities): List<TorrentDetailPrimaryAction> =
+    buildList {
+        if (capabilities.supportsExportTorrent) add(TorrentDetailPrimaryAction.ExportTorrent)
+        if (capabilities.supportsReannounce) add(TorrentDetailPrimaryAction.Reannounce)
+        if (capabilities.supportsRecheck) add(TorrentDetailPrimaryAction.Recheck)
+    }
+
+@Composable
+private fun TorrentDetailInfoTab(
+    torrent: TorrentInfo,
+    capabilities: ServerCapabilities,
+    isPending: Boolean,
+    magnetUri: String,
+    categoryOptions: List<String>,
+    tagOptions: List<String>,
+    paused: Boolean,
+    renameText: String,
+    locationText: String,
+    categoryTextInput: String,
+    tagsTextInput: String,
+    downloadLimitText: String,
+    uploadLimitText: String,
+    ratioText: String,
+    onRenameTextChange: (String) -> Unit,
+    onLocationTextChange: (String) -> Unit,
+    onCategoryTextChange: (String) -> Unit,
+    onTagsTextChange: (String) -> Unit,
+    onDownloadLimitTextChange: (String) -> Unit,
+    onUploadLimitTextChange: (String) -> Unit,
+    onRatioTextChange: (String) -> Unit,
+    onCopyHash: () -> Unit,
+    onCopyMagnet: () -> Unit,
+    onExportTorrent: () -> Unit,
+    onRename: () -> Unit,
+    onSetLocation: () -> Unit,
+    onSetCategory: () -> Unit,
+    onSetTags: () -> Unit,
+    onSetSpeedLimit: () -> Unit,
+    onSetShareRatio: () -> Unit,
+    onReannounce: () -> Unit,
+    onRecheck: () -> Unit,
+    onPauseResume: () -> Unit,
+    onRequestDelete: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            stringResource(R.string.detail_section_basic),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        DetailReadonlyActionRow(
+            label = stringResource(R.string.detail_hash_label),
+            value = torrent.hash.ifBlank { "-" },
+            actionText = stringResource(R.string.copy),
+            enabled = !isPending && torrent.hash.isNotBlank(),
+            onAction = onCopyHash,
+        )
+        DetailReadonlyActionRow(
+            label = stringResource(R.string.detail_magnet_label),
+            value = magnetUri.ifBlank { "-" },
+            actionText = stringResource(R.string.copy),
+            enabled = !isPending && magnetUri.isNotBlank(),
+            onAction = onCopyMagnet,
+        )
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            contentPadding = PaddingValues(0.dp),
+        ) {
+            items(
+                items = torrentDetailPrimaryActions(capabilities),
+                key = { action -> action.name },
+            ) { action ->
+                val accentColor = when (action) {
+                    TorrentDetailPrimaryAction.ExportTorrent -> MaterialTheme.colorScheme.secondary
+                    TorrentDetailPrimaryAction.Reannounce -> Color(0xFF4C8DFF)
+                    TorrentDetailPrimaryAction.Recheck -> Color(0xFFF3A53C)
+                }
+                val label = when (action) {
+                    TorrentDetailPrimaryAction.ExportTorrent -> stringResource(R.string.detail_export_torrent)
+                    TorrentDetailPrimaryAction.Reannounce -> stringResource(R.string.detail_reannounce)
+                    TorrentDetailPrimaryAction.Recheck -> stringResource(R.string.detail_recheck)
+                }
+                val clickAction = when (action) {
+                    TorrentDetailPrimaryAction.ExportTorrent -> onExportTorrent
+                    TorrentDetailPrimaryAction.Reannounce -> onReannounce
+                    TorrentDetailPrimaryAction.Recheck -> onRecheck
+                }
+                DetailInlineActionButton(
+                    text = label,
+                    enabled = !isPending && torrent.hash.isNotBlank(),
+                    accentColor = accentColor,
+                    onClick = clickAction,
+                )
+            }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
+        if (capabilities.supportsRename) {
+            Text(
+                stringResource(R.string.detail_section_name),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            ActionInputRow(
+                label = stringResource(R.string.detail_new_name_label),
+                value = renameText,
+                onValueChange = onRenameTextChange,
+                actionText = stringResource(R.string.detail_action_change),
+                enabled = !isPending,
+                onAction = onRename,
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
+        }
+        Text(
+            stringResource(R.string.detail_section_path),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = stringResource(R.string.detail_set_path_hint),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        ActionInputRow(
+            label = stringResource(R.string.detail_save_path_label),
+            value = locationText,
+            onValueChange = onLocationTextChange,
+            actionText = stringResource(R.string.detail_action_change),
+            enabled = !isPending,
+            onAction = onSetLocation,
+        )
+        if (capabilities.supportsCategories) {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
+            Text(
+                stringResource(R.string.detail_section_category),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (categoryOptions.isNotEmpty()) {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    contentPadding = PaddingValues(0.dp),
                 ) {
-                    Text(
-                        text = stringResource(R.string.delete),
-                        color = MaterialTheme.colorScheme.error,
+                    items(categoryOptions, key = { it }) { option ->
+                        TorrentMetaChip(
+                            text = option,
+                            containerColor = if (option == categoryTextInput) Color(0xFF5D7CFF) else Color(0xFF4D4D4D),
+                            contentColor = Color(0xFFEAF0FF),
+                            onClick = { onCategoryTextChange(option) },
+                        )
+                    }
+                }
+            }
+            ActionInputRow(
+                label = stringResource(R.string.detail_category_label),
+                value = categoryTextInput,
+                onValueChange = onCategoryTextChange,
+                actionText = stringResource(R.string.detail_action_change),
+                enabled = !isPending,
+                onAction = onSetCategory,
+            )
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
+        Text(
+            stringResource(R.string.detail_section_tags),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (tagOptions.isNotEmpty()) {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                contentPadding = PaddingValues(0.dp),
+            ) {
+                items(tagOptions, key = { it }) { option ->
+                    val selected = parseTags(tagsTextInput).contains(option)
+                    TorrentMetaChip(
+                        text = option,
+                        containerColor = if (selected) Color(0xFF5D7CFF) else Color(0xFF4D4D4D),
+                        contentColor = Color(0xFFEAF0FF),
+                        onClick = { onTagsTextChange(toggleTag(tagsTextInput, option)) },
                     )
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDeleteTracker = null }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
+            }
+        }
+        ActionInputRow(
+            label = stringResource(R.string.detail_tags_label),
+            value = tagsTextInput,
+            onValueChange = onTagsTextChange,
+            actionText = stringResource(R.string.detail_action_change),
+            enabled = !isPending,
+            onAction = onSetTags,
         )
+        if (capabilities.supportsPerTorrentSpeedLimit) {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
+            Text(
+                stringResource(R.string.detail_section_speed_limit),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    value = downloadLimitText,
+                    onValueChange = onDownloadLimitTextChange,
+                    modifier = Modifier.weight(1f),
+                    label = { Text(stringResource(R.string.detail_download_kb_label)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    enabled = !isPending,
+                )
+                OutlinedTextField(
+                    value = uploadLimitText,
+                    onValueChange = onUploadLimitTextChange,
+                    modifier = Modifier.weight(1f),
+                    label = { Text(stringResource(R.string.detail_upload_kb_label)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    enabled = !isPending,
+                )
+                TextButton(
+                    onClick = onSetSpeedLimit,
+                    enabled = !isPending,
+                    modifier = Modifier.background(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                        shape = RoundedCornerShape(8.dp),
+                    ),
+                ) {
+                    Text(stringResource(R.string.detail_action_apply))
+                }
+            }
+        }
+        if (capabilities.supportsShareRatio) {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
+            Text(
+                stringResource(R.string.detail_section_ratio),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            ActionInputRow(
+                label = stringResource(R.string.detail_ratio_label),
+                value = ratioText,
+                onValueChange = onRatioTextChange,
+                actionText = stringResource(R.string.detail_action_apply),
+                enabled = !isPending,
+                onAction = onSetShareRatio,
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            TextButton(
+                onClick = onPauseResume,
+                enabled = !isPending,
+                modifier = Modifier
+                    .weight(1f)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f), RoundedCornerShape(8.dp)),
+            ) {
+                Text(if (paused) stringResource(R.string.resume) else stringResource(R.string.pause))
+            }
+            TextButton(
+                onClick = onRequestDelete,
+                enabled = !isPending,
+                modifier = Modifier
+                    .weight(1f)
+                    .background(MaterialTheme.colorScheme.error.copy(alpha = 0.14f), RoundedCornerShape(8.dp)),
+            ) {
+                Text(stringResource(R.string.delete))
+            }
+        }
     }
 }
 
-private data class TorrentFileTreeNode(
+@Composable
+private fun TorrentDeleteDialog(
+    visible: Boolean,
+    deleteFilesChecked: Boolean,
+    isPending: Boolean,
+    onDeleteFilesCheckedChange: (Boolean) -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    if (!visible) {
+        return
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = PanelShape,
+        containerColor = qbGlassStrongContainerColor(),
+        title = { Text(stringResource(R.string.delete_torrent_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.delete_torrent_desc))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(
+                        checked = deleteFilesChecked,
+                        onCheckedChange = onDeleteFilesCheckedChange,
+                    )
+                    Text(stringResource(R.string.delete_files))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                enabled = !isPending,
+            ) {
+                Text(stringResource(R.string.delete))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun TorrentEditTrackerDialog(
+    tracker: TorrentTracker?,
+    trackerUrl: String,
+    isPending: Boolean,
+    onTrackerUrlChange: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: (TorrentTracker) -> Unit,
+) {
+    if (tracker == null) {
+        return
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = PanelShape,
+        containerColor = qbGlassStrongContainerColor(),
+        title = { Text(stringResource(R.string.detail_tracker_edit_title)) },
+        text = {
+            OutlinedTextField(
+                value = trackerUrl,
+                onValueChange = onTrackerUrlChange,
+                label = { Text(stringResource(R.string.detail_tracker_url_label)) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                enabled = !isPending,
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(tracker) },
+                enabled = !isPending && trackerUrl.trim().isNotBlank(),
+            ) {
+                Text(stringResource(R.string.server_save_action))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun TorrentDeleteTrackerDialog(
+    tracker: TorrentTracker?,
+    isPending: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (TorrentTracker) -> Unit,
+) {
+    if (tracker == null) {
+        return
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = PanelShape,
+        containerColor = qbGlassStrongContainerColor(),
+        title = { Text(stringResource(R.string.detail_tracker_delete_title)) },
+        text = { Text(stringResource(R.string.detail_tracker_delete_desc)) },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(tracker) },
+                enabled = !isPending,
+            ) {
+                Text(
+                    text = stringResource(R.string.delete),
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun TorrentDetailTrackersTab(
+    detailLoading: Boolean,
+    detailTrackers: List<TorrentTracker>,
+    hasMutableTrackers: Boolean,
+    trackersPasskeyVisible: Boolean,
+    isPending: Boolean,
+    supportsTrackerMutation: Boolean,
+    onTogglePasskeyVisibility: () -> Unit,
+    onCopyTracker: (TorrentTracker) -> Unit,
+    onEditTracker: (TorrentTracker, String) -> Unit,
+    onDeleteTracker: (TorrentTracker) -> Unit,
+) {
+    if (detailLoading && detailTrackers.isEmpty()) {
+        Text(
+            stringResource(R.string.loading),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        TorrentMetaChip(
+            text = pluralStringResource(
+                R.plurals.detail_tracker_count,
+                detailTrackers.size,
+                detailTrackers.size,
+            ),
+            containerColor = Color(0xFF6C3FD3),
+            contentColor = Color.White,
+        )
+        if (hasMutableTrackers) {
+            TextButton(onClick = onTogglePasskeyVisibility) {
+                Icon(
+                    painter = painterResource(
+                        id = if (trackersPasskeyVisible) R.drawable.ic_password_hidden else R.drawable.ic_password_visible,
+                    ),
+                    contentDescription = stringResource(
+                        if (trackersPasskeyVisible) R.string.detail_hide_passkey else R.string.detail_show_passkey,
+                    ),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+    }
+    if (detailTrackers.isEmpty()) {
+        Text(
+            text = stringResource(R.string.no_tracker_info),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    } else {
+        detailTrackers.forEach { tracker ->
+            val trackerUrl = tracker.url
+            val isMutableTracker = isMutableTrackerUrl(trackerUrl)
+            val canMutateTracker =
+                !isPending &&
+                    supportsTrackerMutation &&
+                    isMutableTracker &&
+                    trackerUrl.isNotBlank()
+            TrackerInfoCard(
+                tracker = tracker,
+                displayUrl = when {
+                    !isMutableTracker -> trackerUrl.ifBlank { "-" }
+                    trackersPasskeyVisible -> trackerUrl.ifBlank { "-" }
+                    else -> maskTrackerUrl(trackerUrl)
+                },
+                allowMutation = supportsTrackerMutation && isMutableTracker,
+                onCopy = if (!isPending && isMutableTracker && trackerUrl.isNotBlank()) {
+                    { onCopyTracker(tracker) }
+                } else {
+                    null
+                },
+                onEdit = if (canMutateTracker) {
+                    { onEditTracker(tracker, trackerUrl) }
+                } else {
+                    null
+                },
+                onDelete = if (canMutateTracker) {
+                    { onDeleteTracker(tracker) }
+                } else {
+                    null
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun TorrentDetailPeersTab(
+    peerOverviewItems: List<Pair<String, String>>,
+) {
+    TorrentUnifiedInfoPanel(
+        items = peerOverviewItems,
+        style = TorrentUnifiedInfoPanelStyle.Summary,
+    )
+}
+
+@Composable
+private fun TorrentDetailFilesTab(
+    detailLoading: Boolean,
+    detailFiles: List<TorrentFileInfo>,
+    fileBrowserPath: List<String>,
+    fileBrowserSelection: TorrentFileBrowserSelection,
+    onOpenRoot: () -> Unit,
+    onOpenPathSegment: (Int) -> Unit,
+    onOpenDirectory: (TorrentFileTreeNode) -> Unit,
+) {
+    if (detailLoading) {
+        Text(
+            stringResource(R.string.loading_files),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    } else if (detailFiles.isEmpty()) {
+        Text(
+            stringResource(R.string.no_file_details),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    } else {
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            contentPadding = PaddingValues(0.dp),
+        ) {
+            item {
+                TorrentMetaChip(
+                    text = stringResource(R.string.detail_files_root),
+                    containerColor = if (fileBrowserPath.isEmpty()) Color(0xFF4469FF) else Color(0xFF2E3340),
+                    contentColor = Color.White,
+                    onClick = onOpenRoot,
+                )
+            }
+            fileBrowserPath.forEachIndexed { index, segment ->
+                item {
+                    Text(
+                        text = "/",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 5.dp),
+                    )
+                }
+                item {
+                    TorrentMetaChip(
+                        text = segment,
+                        containerColor = if (index == fileBrowserPath.lastIndex) Color(0xFF5D7CFF) else Color(0xFF2E3340),
+                        contentColor = Color.White,
+                        onClick = { onOpenPathSegment(index) },
+                    )
+                }
+            }
+        }
+        fileBrowserSelection.node.children.forEach { node ->
+            TorrentFileBrowserNodeCard(
+                node = node,
+                onOpenDirectory = {
+                    if (node.isDirectory) {
+                        onOpenDirectory(node)
+                    }
+                },
+            )
+        }
+    }
+}
+
+internal data class TorrentFileTreeNode(
     val name: String,
     val fullPath: String,
     val isDirectory: Boolean,
@@ -782,6 +991,11 @@ private data class TorrentFileTreeNode(
     val orderIndex: Int,
     val pathSegments: List<String>,
     val children: List<TorrentFileTreeNode> = emptyList(),
+)
+
+internal data class TorrentFileBrowserSelection(
+    val node: TorrentFileTreeNode,
+    val pathSegments: List<String>,
 )
 
 private class MutableTorrentFileTreeNode(
@@ -797,7 +1011,7 @@ private class MutableTorrentFileTreeNode(
     var fileCount: Int = 0
 }
 
-private fun buildTorrentFileTree(files: List<TorrentFileInfo>): TorrentFileTreeNode {
+internal fun buildTorrentFileTree(files: List<TorrentFileInfo>): TorrentFileTreeNode {
     val root = MutableTorrentFileTreeNode(
         name = "",
         fullPath = "",
@@ -810,9 +1024,11 @@ private fun buildTorrentFileTree(files: List<TorrentFileInfo>): TorrentFileTreeN
         if (cleanPath.isBlank()) return@forEachIndexed
         val segments = cleanPath.split('/').filter { it.isNotBlank() }
         if (segments.isEmpty()) return@forEachIndexed
+        val clampedProgress = file.progress.coerceIn(0f, 1f).toDouble()
+        val weightedProgress = file.size.toDouble() * clampedProgress
         var current = root
         current.size += file.size
-        current.weightedProgress += file.size * file.progress.coerceIn(0f, 1f)
+        current.weightedProgress += weightedProgress
         current.fileCount += 1
         segments.forEachIndexed { index, segment ->
             val isFile = index == segments.lastIndex
@@ -829,11 +1045,11 @@ private fun buildTorrentFileTree(files: List<TorrentFileInfo>): TorrentFileTreeN
             }
             if (isFile) {
                 child.size = file.size
-                child.weightedProgress = file.size.toDouble() * file.progress.coerceIn(0f, 1f).toDouble()
+                child.weightedProgress = weightedProgress
                 child.fileCount = 1
             } else {
                 child.size += file.size
-                child.weightedProgress += file.size.toDouble() * file.progress.coerceIn(0f, 1f).toDouble()
+                child.weightedProgress += weightedProgress
                 child.fileCount += 1
             }
             current = child
@@ -877,6 +1093,24 @@ private fun resolveTorrentFileTreeNode(
         current = current.children.firstOrNull { it.name == segment } ?: return null
     }
     return current
+}
+
+internal fun resolveTorrentFileBrowserSelection(
+    root: TorrentFileTreeNode,
+    pathSegments: List<String>,
+): TorrentFileBrowserSelection {
+    val resolvedNode = resolveTorrentFileTreeNode(root, pathSegments)
+    return if (resolvedNode != null) {
+        TorrentFileBrowserSelection(
+            node = resolvedNode,
+            pathSegments = pathSegments,
+        )
+    } else {
+        TorrentFileBrowserSelection(
+            node = root,
+            pathSegments = emptyList(),
+        )
+    }
 }
 
 @Composable

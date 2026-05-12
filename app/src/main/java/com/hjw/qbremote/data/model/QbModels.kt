@@ -11,6 +11,7 @@ data class TransferInfo(
     @SerializedName("up_rate_limit") val uploadRateLimit: Long = 0,
     @SerializedName("free_space_on_disk") val freeSpaceOnDisk: Long = 0,
     @SerializedName("dht_nodes") val dhtNodes: Int = 0,
+    val totalTorrentCount: Int = 0,
 )
 
 data class TorrentInfo(
