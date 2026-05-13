@@ -598,7 +598,7 @@ class QbRepository : TorrentBackend {
         val successBody = response.body()?.trim().orEmpty()
         val errorBodyText = response.errorBody()?.string()?.trim().orEmpty()
         val loginText = successBody.ifBlank { errorBodyText }
-        val loginOk = response.isSuccessful && loginText.equals("Ok.", ignoreCase = true)
+        val loginOk = response.isSuccessful && (loginText.equals("Ok.", ignoreCase = true) || response.code() == 204)
         if (loginOk) {
             return LoginResult(success = true, detail = "$endpointLabel -> Ok.")
         }
