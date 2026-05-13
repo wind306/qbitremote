@@ -391,9 +391,36 @@ class QbRepository : TorrentBackend {
         }
         response.ensureSuccess("Add torrent failed.")
         val resultText = response.body().orEmpty().trim()
-        if (resultText.contains("fail", ignoreCase = true)) {
-            throw IllegalStateException("添加种子失败：$resultText")
+        if (resultText.equals("Ok.", ignoreCase = true)) {
+            return@runCatching
         }
+        if (resultText.startsWith("{")) {
+            try {
+                val json = JsonParser.parseString(resultText).asJsonObject
+                val successCount = json.get("success_count")?.asInt ?: 0
+                val failureCount = json.get("failure_count")?.asInt ?: 0
+                val pendingCount = json.get("pending_count")?.asInt ?: 0
+                val addedIds = json.getAsJsonArray("added_torrent_ids")
+                val hasSuccess = successCount > 0 || (addedIds != null && addedIds.size() > 0)
+                val hasPending = pendingCount > 0
+                if (hasSuccess || hasPending) {
+                    if (failureCount > 0) {
+                        throw IllegalStateException("部分种子添加失败：成功 $successCount 个，失败 $failureCount 个，处理中 $pendingCount 个")
+                    } else {
+                        return@runCatching
+                    }
+                } else {
+                    throw IllegalStateException("添加种子失败：所有种子均未添加")
+                }
+            } catch (e: Exception) {
+                if (e is IllegalStateException) throw e
+                throw IllegalStateException("添加种子失败：响应解析错误 - $resultText", e)
+            }
+        }
+        if (resultText.equals("Fails.", ignoreCase = true)) {
+            throw IllegalStateException("添加种子失败：用户名或密码错误")
+        }
+        throw IllegalStateException("添加种子失败：响应格式无法识别 - $resultText")
     }
 
     private suspend fun fallbackFullRefresh(): DashboardData {
